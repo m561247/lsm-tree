@@ -37,6 +37,8 @@ impl SnapshotCounter {
     }
 }
 
+// TODO: support BlobTree
+
 /// A snapshot captures a read-only point-in-time view of the tree at the time the snapshot was created
 ///
 /// As long as the snapshot is open, old versions of objects will not be evicted as to
@@ -63,7 +65,7 @@ impl Snapshot {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     /// let snapshot = tree.snapshot(0);
@@ -95,7 +97,7 @@ impl Snapshot {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -126,7 +128,7 @@ impl Snapshot {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -156,7 +158,7 @@ impl Snapshot {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -185,7 +187,7 @@ impl Snapshot {
     ///
     /// ```
     /// # use lsm_tree::Error as TreeError;
-    /// use lsm_tree::{Tree, Config};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// # let folder = tempfile::tempdir()?;
     /// let tree = Config::new(folder).open()?;
@@ -220,7 +222,7 @@ impl Snapshot {
     ///
     /// ```
     /// # use lsm_tree::Error as TreeError;
-    /// use lsm_tree::{Tree, Config};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// # let folder = tempfile::tempdir()?;
     /// let tree = Config::new(folder).open()?;
@@ -254,7 +256,7 @@ impl Snapshot {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     /// let snapshot = tree.snapshot(0);
@@ -282,7 +284,7 @@ impl Snapshot {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     /// let snapshot = tree.snapshot(0);
@@ -315,7 +317,7 @@ impl Snapshot {
     ///
     /// ```
     /// # use lsm_tree::Error as TreeError;
-    /// use lsm_tree::{Tree, Config};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// # let folder = tempfile::tempdir()?;
     /// let tree = Config::new(folder).open()?;

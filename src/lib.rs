@@ -31,7 +31,7 @@
 //! # Example usage
 //!
 //! ```
-//! use lsm_tree::{Tree, Config};
+//! use lsm_tree::{AbstractTree, Config, Tree};
 //! #
 //! # let folder = tempfile::tempdir()?;
 //!
@@ -94,6 +94,11 @@
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("compilation is only allowed for 64-bit targets");
+
+mod r#abstract;
+
+#[doc(hidden)]
+pub mod blob_tree;
 
 mod block_cache;
 
@@ -158,10 +163,12 @@ mod value;
 mod version;
 
 pub use {
+    blob_tree::BlobTree,
     block_cache::BlockCache,
     config::Config,
     error::{Error, Result},
     memtable::MemTable,
+    r#abstract::AbstractTree,
     segment::Segment,
     seqno::SequenceNumberCounter,
     serde::{DeserializeError, SerializeError},

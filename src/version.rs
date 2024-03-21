@@ -5,6 +5,7 @@ use std::io::Cursor;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Version {
     V0,
+    // V1,
 }
 
 impl std::fmt::Display for Version {

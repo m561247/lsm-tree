@@ -16,11 +16,6 @@ fn absolute_path<P: AsRef<Path>>(path: P) -> PathBuf {
         .into()
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-enum TreeType {
-    Standard,
-}
-
 /// Tree configuration
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[allow(clippy::module_name_repetitions)]
@@ -42,8 +37,6 @@ pub struct PersistedConfig {
     /// A level target size is: max_memtable_size * level_ratio.pow(#level + 1)
     pub level_ratio: u8,
 
-    r#type: TreeType,
-
     /// What type of compression is used
     compression: CompressionType,
 }
@@ -57,7 +50,6 @@ impl Default for PersistedConfig {
             block_size: 4_096,
             level_count: 7,
             level_ratio: 8,
-            r#type: TreeType::Standard,
             compression: CompressionType::Lz4,
         }
     }

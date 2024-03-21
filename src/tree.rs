@@ -17,7 +17,7 @@ use crate::{
     stop_signal::StopSignal,
     tree_inner::{SealedMemtables, TreeInner},
     version::Version,
-    BlockCache, SeqNo, Snapshot, UserKey, UserValue, Value, ValueType,
+    AbstractTree, BlockCache, SeqNo, Snapshot, UserKey, UserValue, Value, ValueType,
 };
 use std::{
     io::Write,
@@ -34,7 +34,7 @@ fn ignore_tombstone_value(item: Value) -> Option<Value> {
     }
 }
 
-/// A log-structured merge tree (LSM-tree/LSMT)
+/// A log-structured merge tree
 #[derive(Clone)]
 pub struct Tree(pub(crate) Arc<TreeInner>);
 
@@ -43,6 +43,22 @@ impl std::ops::Deref for Tree {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl AbstractTree for Tree {
+    fn get<K: AsRef<[u8]>>(&self, key: K) -> crate::Result<Option<UserValue>> {
+        Self::get(self, key)
+    }
+
+    fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V, seqno: SeqNo) -> (u32, u32) {
+        let value = Value::new(key.as_ref(), value.as_ref(), seqno, ValueType::Value);
+        self.append_entry(value)
+    }
+
+    fn remove<K: AsRef<[u8]>>(&self, key: K, seqno: SeqNo) -> (u32, u32) {
+        let value = Value::new(key.as_ref(), vec![], seqno, ValueType::Tombstone);
+        self.append_entry(value)
     }
 }
 
@@ -122,7 +138,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -324,7 +340,7 @@ impl Tree {
     ///
     /// ```
     /// # use lsm_tree::Error as TreeError;
-    /// use lsm_tree::{Tree, Config};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let folder = tempfile::tempdir()?;
     /// let tree = Config::new(folder).open()?;
@@ -361,7 +377,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     /// assert!(tree.is_empty()?);
@@ -430,7 +446,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     /// tree.insert("a", "my_value", 0);
@@ -448,7 +464,7 @@ impl Tree {
         Ok(self.get_internal_entry(key, true, None)?.map(|x| x.value))
     }
 
-    /// Inserts a key-value pair into the tree.
+    /* /// Inserts a key-value pair into the tree.
     ///
     /// If the key already exists, the item will be overwritten.
     ///
@@ -458,7 +474,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     /// tree.insert("a", "abc", 0);
@@ -477,9 +493,9 @@ impl Tree {
     ) -> (u32, u32) {
         let value = Value::new(key.as_ref(), value.as_ref(), seqno, ValueType::Value);
         self.append_entry(value)
-    }
+    } */
 
-    /// Removes an item from the tree.
+    /* /// Removes an item from the tree.
     ///
     /// Returns the added item's size and new size of the memtable.
     ///
@@ -487,7 +503,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// # use lsm_tree::{Config, Tree};
+    /// # use lsm_tree::{AbstractTree, Config, Tree};
     /// #
     /// # let tree = Config::new(folder).open()?;
     /// tree.insert("a", "abc", 0);
@@ -509,7 +525,7 @@ impl Tree {
     pub fn remove<K: AsRef<[u8]>>(&self, key: K, seqno: SeqNo) -> (u32, u32) {
         let value = Value::new(key.as_ref(), vec![], seqno, ValueType::Tombstone);
         self.append_entry(value)
-    }
+    } */
 
     /// Returns `true` if the tree contains the specified key.
     ///
@@ -517,7 +533,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// # use lsm_tree::{Config, Tree};
+    /// # use lsm_tree::{AbstractTree, Config, Tree};
     /// #
     /// let tree = Config::new(folder).open()?;
     /// assert!(!tree.contains_key("a")?);
@@ -547,7 +563,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -619,7 +635,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -675,7 +691,7 @@ impl Tree {
     ///
     /// ```
     /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{Config, Tree};
+    /// use lsm_tree::{AbstractTree, Config, Tree};
     ///
     /// let tree = Config::new(folder).open()?;
     ///
@@ -701,7 +717,7 @@ impl Tree {
     ///
     /// ```
     /// # use lsm_tree::Error as TreeError;
-    /// # use lsm_tree::{Tree, Config};
+    /// # use lsm_tree::{AbstractTree, Config, Tree};
     /// #
     /// # let folder = tempfile::tempdir()?;
     /// let tree = Config::new(folder).open()?;
@@ -735,7 +751,7 @@ impl Tree {
     ///
     /// ```
     /// # use lsm_tree::Error as TreeError;
-    /// # use lsm_tree::{Tree, Config};
+    /// # use lsm_tree::{AbstractTree, Config, Tree};
     /// #
     /// # let folder = tempfile::tempdir()?;
     /// # let tree = Config::new(folder).open()?;

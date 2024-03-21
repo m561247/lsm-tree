@@ -21,6 +21,9 @@ pub enum Error {
 
     /// Invalid data format version
     InvalidVersion(Option<Version>),
+
+    /// Value log errors
+    ValueLog(value_log::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -52,6 +55,12 @@ impl From<DeserializeError> for Error {
 impl From<DecompressError> for Error {
     fn from(value: DecompressError) -> Self {
         Self::Decompress(value)
+    }
+}
+
+impl From<value_log::Error> for Error {
+    fn from(value: value_log::Error) -> Self {
+        Self::ValueLog(value)
     }
 }
 

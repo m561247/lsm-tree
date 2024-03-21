@@ -1,4 +1,4 @@
-use lsm_tree::Config;
+use lsm_tree::{AbstractTree, Config};
 use std::sync::Arc;
 use tempfile::tempdir;
 use test_log::test;

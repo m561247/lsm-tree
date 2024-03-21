@@ -31,6 +31,7 @@ This is the most feature-rich LSM-tree implementation in Rust! It features:
 - Block caching to keep hot data in memory
 - Bloom filters to increase point lookup performance (`bloom` feature, disabled by default)
 - Snapshots (MVCC)
+- Optional key-value separation, inspired by RocksDB's BlobDB [[2]](#footnotes)
 
 Keys are limited to 65536 bytes, values are limited to 2^32 bytes. As is normal with any kind of storage
 engine, larger keys and values have a bigger performance impact.
@@ -56,3 +57,4 @@ cargo bench --features bloom
 ## Footnotes
 
 [1] https://rocksdb.org/blog/2017/05/12/partitioned-index-filter.html
+[2] https://github.com/facebook/rocksdb/wiki/BlobDB
