@@ -26,12 +26,12 @@ impl MemTable {
         // We search for the lowest entry that is greater or equal the user's prefix key
         // and has the highest seqno (because the seqno is stored in reverse order)
         //
-        // Example: We search for "asd"
+        // Example: We search for "abc"
         //
         // key -> seqno
         //
         // a   -> 7
-        // abc -> 5 <<< This is the lowest key that matches the range
+        // abc -> 5 <<< This is the lowest key (highest seqno) that matches the range
         // abc -> 4
         // abc -> 3
         // abcdef -> 6
@@ -42,8 +42,7 @@ impl MemTable {
         for entry in self.items.range(range) {
             let key = entry.key();
 
-            // TODO: add benchmark to check upper bound of this query
-            // We are past the searched key, so we can immediately return None
+            // NOTE: We are past the searched key, so we can immediately return None
             if &*key.user_key > prefix {
                 return None;
             }
@@ -80,6 +79,8 @@ impl MemTable {
 
     /// Inserts an item into the memtable
     pub fn insert(&self, item: Value) -> (u32, u32) {
+        // NOTE: Value length is u32 max
+        #[allow(clippy::cast_possible_truncation)]
         let item_size = item.size() as u32;
 
         let size_before = self
@@ -111,7 +112,51 @@ mod tests {
     use test_log::test;
 
     #[test]
-    fn test_memtable_get() {
+    #[allow(clippy::unwrap_used)]
+    fn memtable_mvcc_point_read() {
+        let memtable = MemTable::default();
+
+        memtable.insert(Value::new(
+            *b"hello-key-999991",
+            *b"hello-value-999991",
+            0,
+            ValueType::Value,
+        ));
+
+        let item = memtable.get("hello-key-99999", None);
+        assert_eq!(None, item);
+
+        let item = memtable.get("hello-key-999991", None);
+        assert_eq!(*b"hello-value-999991", &*item.unwrap().value);
+
+        memtable.insert(Value::new(
+            *b"hello-key-999991",
+            *b"hello-value-999991-2",
+            1,
+            ValueType::Value,
+        ));
+
+        let item = memtable.get("hello-key-99999", None);
+        assert_eq!(None, item);
+
+        let item = memtable.get("hello-key-999991", None);
+        assert_eq!((*b"hello-value-999991-2"), &*item.unwrap().value);
+
+        let item = memtable.get("hello-key-99999", Some(1));
+        assert_eq!(None, item);
+
+        let item = memtable.get("hello-key-999991", Some(1));
+        assert_eq!((*b"hello-value-999991"), &*item.unwrap().value);
+
+        let item = memtable.get("hello-key-99999", Some(2));
+        assert_eq!(None, item);
+
+        let item = memtable.get("hello-key-999991", Some(2));
+        assert_eq!((*b"hello-value-999991-2"), &*item.unwrap().value);
+    }
+
+    #[test]
+    fn memtable_get() {
         let memtable = MemTable::default();
 
         let value = Value::new(b"abc".to_vec(), b"abc".to_vec(), 0, ValueType::Value);
@@ -122,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn test_memtable_get_highest_seqno() {
+    fn memtable_get_highest_seqno() {
         let memtable = MemTable::default();
 
         memtable.insert(Value::new(
@@ -168,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_memtable_get_prefix() {
+    fn memtable_get_prefix() {
         let memtable = MemTable::default();
 
         memtable.insert(Value::new(
@@ -206,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_memtable_get_old_version() {
+    fn memtable_get_old_version() {
         let memtable = MemTable::default();
 
         memtable.insert(Value::new(

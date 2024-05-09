@@ -127,19 +127,20 @@ pub mod file;
 #[doc(hidden)]
 pub mod flush;
 
-#[doc(hidden)]
-pub mod id;
-
 mod key_range;
-mod levels;
+
+#[doc(hidden)]
+pub mod levels;
 
 mod lru_list;
 
 mod memtable;
-mod merge;
 
-/* #[doc(hidden)]
-pub mod prefix; */
+#[doc(hidden)]
+pub mod merge;
+
+#[doc(hidden)]
+pub mod prefix;
 
 #[doc(hidden)]
 pub mod range;
@@ -165,6 +166,12 @@ mod version;
 
 #[cfg(feature = "kv-sep")]
 pub use blob_tree::BlobTree;
+
+#[doc(hidden)]
+pub use {
+    segment::{id::GlobalSegmentId, meta::SegmentId},
+    tree_inner::TreeId,
+};
 
 pub use {
     block_cache::BlockCache,

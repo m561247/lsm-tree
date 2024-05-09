@@ -1,6 +1,9 @@
 pub mod block;
 pub mod block_index;
+pub mod id;
+pub mod index_block_consumer;
 pub mod meta;
+pub mod multi_reader;
 pub mod multi_writer;
 pub mod prefix;
 pub mod range;
@@ -8,13 +11,13 @@ pub mod reader;
 pub mod writer;
 
 use self::{
-    block::load_and_cache_by_block_handle, block_index::BlockIndex, meta::Metadata,
-    prefix::PrefixedReader, range::Range, reader::Reader,
+    block_index::BlockIndex, meta::Metadata, prefix::PrefixedReader, range::Range, reader::Reader,
 };
 use crate::{
     block_cache::BlockCache,
     descriptor_table::FileDescriptorTable,
     file::SEGMENT_METADATA_FILE,
+    tree_inner::TreeId,
     value::{SeqNo, UserKey},
     Value,
 };
@@ -35,22 +38,28 @@ use crate::file::BLOOM_FILTER_FILE;
 ///
 /// Segments can be merged together to remove duplicates, reducing disk space and improving read performance.
 pub struct Segment {
-    pub(crate) descriptor_table: Arc<FileDescriptorTable>,
+    pub(crate) tree_id: TreeId,
 
-    /// Segment metadata object (will be stored in a JSON file)
+    #[doc(hidden)]
+    pub descriptor_table: Arc<FileDescriptorTable>,
+
+    /// Segment metadata object
     pub metadata: meta::Metadata,
 
     /// Translates key (first item of a block) to block offset (address inside file) and (compressed) size
-    pub(crate) block_index: Arc<BlockIndex>,
+    #[doc(hidden)]
+    pub block_index: Arc<BlockIndex>,
 
     /// Block cache
     ///
     /// Stores index and data blocks
-    pub(crate) block_cache: Arc<BlockCache>,
+    #[doc(hidden)]
+    pub block_cache: Arc<BlockCache>,
 
     /// Bloom filter
     #[cfg(feature = "bloom")]
-    pub(crate) bloom_filter: BloomFilter,
+    #[doc(hidden)]
+    pub bloom_filter: BloomFilter,
 }
 
 impl std::fmt::Debug for Segment {
@@ -63,6 +72,7 @@ impl Segment {
     /// Tries to recover a segment from a folder.
     pub fn recover<P: AsRef<Path>>(
         folder: P,
+        tree_id: TreeId,
         block_cache: Arc<BlockCache>,
         descriptor_table: Arc<FileDescriptorTable>,
     ) -> crate::Result<Self> {
@@ -70,13 +80,15 @@ impl Segment {
 
         let metadata = Metadata::from_disk(folder.join(SEGMENT_METADATA_FILE))?;
         let block_index = BlockIndex::from_file(
-            metadata.id.clone(),
+            (tree_id, metadata.id).into(),
             descriptor_table.clone(),
             folder,
             Arc::clone(&block_cache),
         )?;
 
         Ok(Self {
+            tree_id,
+
             descriptor_table,
             metadata,
             block_index: Arc::new(block_index),
@@ -116,100 +128,32 @@ impl Segment {
             }
         }
 
-        // Get the block handle, if it doesn't exist, the key is definitely not found
-        let Some(block_handle) = self.block_index.get_latest(key.as_ref())? else {
-            return Ok(None);
-        };
+        let iter = Reader::new(
+            Arc::clone(&self.descriptor_table),
+            (self.tree_id, self.metadata.id).into(),
+            Arc::clone(&self.block_cache),
+            Arc::clone(&self.block_index),
+        )
+        .set_lower_bound(key.into());
 
-        // The block should definitely exist, we just got the block handle before
-        let Some(block) = load_and_cache_by_block_handle(
-            &self.descriptor_table,
-            &self.block_cache,
-            &self.metadata.id,
-            &block_handle,
-        )?
-        else {
-            return Ok(None);
-        };
+        for item in iter {
+            let item = item?;
 
-        let mut maybe_our_items_iter = block
-            .items
-            .iter()
-            // TODO: maybe binary search can be used, but it needs to find the max seqno
-            .filter(|item| item.key == key.as_ref().into());
-
-        match seqno {
-            None => {
-                // NOTE: Fastpath for non-seqno reads (which are most common)
-                // This avoids setting up a rather expensive block iterator
-                // (see explanation for that below)
-                // This only really works because sequence numbers are sorted
-                // in descending order
-                //
-                // If it doesn't exist, we avoid loading the next block
-                // because the block handle was retrieved using the item key, so if
-                // the item exists, it HAS to be in the first block
-
-                Ok(maybe_our_items_iter.next().cloned())
+            // Just stop iterating once we go past our desired key
+            if &*item.key != key {
+                return Ok(None);
             }
-            Some(seqno) => {
-                for item in maybe_our_items_iter {
-                    if item.seqno < seqno {
-                        return Ok(Some(item.clone()));
-                    }
+
+            if let Some(seqno) = seqno {
+                if item.seqno < seqno {
+                    return Ok(Some(item));
                 }
-
-                // NOTE: If we got here, the item was not in the block :(
-
-                // NOTE: For finding a specific seqno,
-                // we need to use a prefixed reader
-                // because nothing really prevents the version
-                // we are searching for to be in the next block
-                // after the one our key starts in
-                //
-                // Example (key:seqno), searching for a:2:
-                //
-                // [..., a:5, a:4] [a:3, a:2, b: 4, b:3]
-                // ^               ^
-                // Block A         Block B
-                //
-                // Based on get_lower_bound_block, "a" is in Block A
-                // However, we are searching for A with seqno 2, which
-                // unfortunately is in the next block
-
-                // Load next block and setup block iterator
-                let Some(next_block_handle) = self
-                    .block_index
-                    .get_next_block_key(&block_handle.start_key)?
-                else {
-                    return Ok(None);
-                };
-
-                let iter = Reader::new(
-                    Arc::clone(&self.descriptor_table),
-                    self.metadata.id.clone(),
-                    Some(Arc::clone(&self.block_cache)),
-                    Arc::clone(&self.block_index),
-                    Some(&next_block_handle.start_key),
-                    None,
-                );
-
-                for item in iter {
-                    let item = item?;
-
-                    // Just stop iterating once we go past our desired key
-                    if &*item.key != key {
-                        return Ok(None);
-                    }
-
-                    if item.seqno < seqno {
-                        return Ok(Some(item));
-                    }
-                }
-
-                Ok(None)
+            } else {
+                return Ok(Some(item));
             }
         }
+
+        Ok(None)
     }
 
     /// Creates an iterator over the `Segment`.
@@ -219,20 +163,12 @@ impl Segment {
     /// Will return `Err` if an IO error occurs.
     #[must_use]
     #[allow(clippy::iter_without_into_iter)]
-    pub fn iter(&self, use_cache: bool) -> Reader {
-        let cache = if use_cache {
-            Some(Arc::clone(&self.block_cache))
-        } else {
-            None
-        };
-
+    pub fn iter(&self) -> Reader {
         Reader::new(
             Arc::clone(&self.descriptor_table),
-            self.metadata.id.clone(),
-            cache,
+            (self.tree_id, self.metadata.id).into(),
+            Arc::clone(&self.block_cache),
             Arc::clone(&self.block_index),
-            None,
-            None,
         )
     }
 
@@ -245,7 +181,7 @@ impl Segment {
     pub fn range(&self, range: (Bound<UserKey>, Bound<UserKey>)) -> Range {
         Range::new(
             Arc::clone(&self.descriptor_table),
-            self.metadata.id.clone(),
+            (self.tree_id, self.metadata.id).into(),
             Arc::clone(&self.block_cache),
             Arc::clone(&self.block_index),
             range,
@@ -261,7 +197,7 @@ impl Segment {
     pub fn prefix<K: Into<UserKey>>(&self, prefix: K) -> PrefixedReader {
         PrefixedReader::new(
             Arc::clone(&self.descriptor_table),
-            self.metadata.id.clone(),
+            (self.tree_id, self.metadata.id).into(),
             Arc::clone(&self.block_cache),
             Arc::clone(&self.block_index),
             prefix,
@@ -279,16 +215,6 @@ impl Segment {
     pub fn tombstone_count(&self) -> u64 {
         self.metadata.tombstone_count
     }
-
-    /*  /// Returns `true` if the key is contained in the segment's key range.
-    pub(crate) fn key_range_contains<K: AsRef<[u8]>>(&self, key: K) -> bool {
-        self.metadata.key_range_contains(key)
-    }
-
-    /// Returns `true` if the prefix matches any key in the segment's key range.
-    pub(crate) fn check_prefix_overlap(&self, prefix: &[u8]) -> bool {
-        self.metadata.key_range.contains_prefix(prefix)
-    } */
 
     /// Checks if a key range is (partially or fully) contained in this segment.
     pub(crate) fn check_key_range_overlap(

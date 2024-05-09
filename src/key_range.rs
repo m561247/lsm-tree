@@ -1,8 +1,12 @@
 use crate::UserKey;
-use serde::{Deserialize, Serialize};
 use std::ops::Bound;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// A key range in the format of [min, max] (inclusive on both sides)
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "segment_history",
+    derive(serde::Deserialize, serde::Serialize)
+)]
 pub struct KeyRange((UserKey, UserKey));
 
 impl std::ops::Deref for KeyRange {
@@ -18,17 +22,33 @@ impl KeyRange {
         Self(range)
     }
 
+    /// Returns `true` if the list of key ranges is disjoint
+    pub fn is_disjoint(ranges: &[Self]) -> bool {
+        for i in 0..ranges.len() {
+            let a = ranges.get(i).expect("should exist");
+
+            for j in (i + 1)..ranges.len() {
+                let b = ranges.get(j).expect("should exist");
+
+                if a.overlaps_with_key_range(b) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
     pub(crate) fn contains_key<K: AsRef<[u8]>>(&self, key: K) -> bool {
         let key = key.as_ref();
         let (start, end) = &self.0;
         key >= start && key <= end
     }
 
-    // TODO: unit tests
     pub fn overlaps_with_key_range(&self, other: &Self) -> bool {
         let (start1, end1) = &self.0;
         let (start2, end2) = &other.0;
-        end1 > start2 && start1 < end2
+        end1 >= start2 && start1 <= end2
     }
 
     // TODO: unit tests
@@ -87,36 +107,90 @@ impl KeyRange {
 mod tests {
     use super::*;
 
+    fn int_key_range(a: u64, b: u64) -> KeyRange {
+        KeyRange::new((a.to_be_bytes().into(), b.to_be_bytes().into()))
+    }
+
+    fn string_key_range(a: &str, b: &str) -> KeyRange {
+        KeyRange::new((a.as_bytes().into(), b.as_bytes().into()))
+    }
+
+    #[test]
+    fn key_range_number_disjoint() {
+        let ranges = [int_key_range(0, 4), int_key_range(0, 4)];
+        assert!(!KeyRange::is_disjoint(&ranges));
+    }
+
+    #[test]
+    fn key_range_disjoint() {
+        let ranges = [string_key_range("a", "d"), string_key_range("g", "z")];
+        assert!(KeyRange::is_disjoint(&ranges));
+    }
+
+    #[test]
+    fn key_range_overlap() {
+        let a = string_key_range("a", "f");
+        let b = string_key_range("b", "h");
+        assert!(a.overlaps_with_key_range(&b));
+    }
+
+    #[test]
+    fn key_range_overlap_edge() {
+        let a = string_key_range("a", "f");
+        let b = string_key_range("f", "t");
+        assert!(a.overlaps_with_key_range(&b));
+    }
+
+    #[test]
+    fn key_range_no_overlap() {
+        let a = string_key_range("a", "f");
+        let b = string_key_range("g", "t");
+        assert!(!a.overlaps_with_key_range(&b));
+    }
+
+    #[test]
+    fn key_range_not_disjoint() {
+        let ranges = [string_key_range("a", "f"), string_key_range("b", "h")];
+        assert!(!KeyRange::is_disjoint(&ranges));
+
+        let ranges = [
+            string_key_range("a", "d"),
+            string_key_range("d", "e"),
+            string_key_range("f", "z"),
+        ];
+        assert!(!KeyRange::is_disjoint(&ranges));
+    }
+
     #[test]
     fn key_range_contains_prefix() {
-        let key_range = KeyRange::new(((*b"a").into(), (*b"d").into()));
+        let key_range = string_key_range("a", "d");
         assert!(key_range.contains_prefix(b"b"));
 
-        let key_range: KeyRange = KeyRange::new(((*b"d").into(), (*b"h").into()));
+        let key_range: KeyRange = string_key_range("d", "h");
         assert!(!key_range.contains_prefix(b"b"));
 
-        let key_range = KeyRange::new(((*b"a").into(), (*b"d").into()));
+        let key_range = string_key_range("a", "d");
         assert!(key_range.contains_prefix(b"abc"));
 
-        let key_range = KeyRange::new(((*b"a").into(), (*b"z").into()));
+        let key_range = string_key_range("a", "z");
         assert!(key_range.contains_prefix(b"abc"));
 
-        let key_range = KeyRange::new(((*b"d").into(), (*b"h").into()));
+        let key_range = string_key_range("d", "h");
         assert!(!key_range.contains_prefix(b"abc"));
 
-        let key_range = KeyRange::new(((*b"a").into(), (*b"z").into()));
+        let key_range = string_key_range("a", "z");
         assert!(key_range.contains_prefix(b""));
 
-        let key_range = KeyRange::new(((*b"a").into(), (*b"c").into()));
+        let key_range = string_key_range("a", "c");
         assert!(!key_range.contains_prefix(b"def"));
 
-        let key_range = KeyRange::new(((*b"a").into(), (*b"d").into()));
+        let key_range = string_key_range("a", "d");
         assert!(key_range.contains_prefix(b"bbb"));
 
-        let key_range = KeyRange::new(((*b"a").into(), (*b"d").into()));
+        let key_range = string_key_range("a", "d");
         assert!(!key_range.contains_prefix(b"da"));
 
-        let key_range = KeyRange::new(((*b"abc").into(), (*b"b").into()));
+        let key_range = string_key_range("abc", "c");
         assert!(key_range.contains_prefix(b"a"));
     }
 }

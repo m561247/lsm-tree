@@ -1,5 +1,9 @@
 use super::{Choice, CompactionStrategy};
-use crate::{config::PersistedConfig, levels::Levels, segment::Segment};
+use crate::{
+    config::PersistedConfig,
+    levels::LevelManifest,
+    segment::{meta::SegmentId, Segment},
+};
 use std::{ops::Deref, sync::Arc};
 
 const L0_SEGMENT_CAP: usize = 20;
@@ -16,9 +20,9 @@ pub struct Strategy;
 
 /// Choose a run of segments that has the least file size sum.
 ///
-/// This minimizes the compaction time (+ write amp) for a amount of segments we
-/// want to get rid of.
-pub fn choose_least_effort_compaction(segments: &[Arc<Segment>], n: usize) -> Vec<Arc<str>> {
+/// This minimizes the compaction time (+ write amp) for a set of segments we
+/// want to partially compact.
+pub fn choose_least_effort_compaction(segments: &[Arc<Segment>], n: usize) -> Vec<SegmentId> {
     let num_segments = segments.len();
 
     // Ensure that n is not greater than the number of segments
@@ -33,11 +37,11 @@ pub fn choose_least_effort_compaction(segments: &[Arc<Segment>], n: usize) -> Ve
         .min_by_key(|window| window.iter().map(|s| s.metadata.file_size).sum::<u64>())
         .expect("should have at least one window");
 
-    window.iter().map(|x| x.metadata.id.clone()).collect()
+    window.iter().map(|x| x.metadata.id).collect()
 }
 
 impl CompactionStrategy for Strategy {
-    fn choose(&self, levels: &Levels, _: &PersistedConfig) -> Choice {
+    fn choose(&self, levels: &LevelManifest, _: &PersistedConfig) -> Choice {
         let resolved_view = levels.resolved_view();
 
         let mut first_level = resolved_view
@@ -77,7 +81,7 @@ mod tests {
         descriptor_table::FileDescriptorTable,
         file::LEVELS_MANIFEST_FILE,
         key_range::KeyRange,
-        levels::Levels,
+        levels::LevelManifest,
         segment::{block_index::BlockIndex, meta::Metadata, Segment},
     };
     use std::sync::Arc;
@@ -87,24 +91,26 @@ mod tests {
     use crate::bloom::BloomFilter;
 
     #[allow(clippy::expect_used)]
-    fn fixture_segment(id: Arc<str>, created_at: u128) -> Arc<Segment> {
+    fn fixture_segment(id: SegmentId, created_at: u128) -> Arc<Segment> {
         let block_cache = Arc::new(BlockCache::with_capacity_bytes(10 * 1_024 * 1_024));
 
         Arc::new(Segment {
+            tree_id: 0,
             descriptor_table: Arc::new(FileDescriptorTable::new(512, 1)),
-            block_index: Arc::new(BlockIndex::new(id.clone(), block_cache.clone())),
+            block_index: Arc::new(BlockIndex::new((0, id).into(), block_cache.clone())),
             metadata: Metadata {
-                version: crate::version::Version::V0,
                 block_count: 0,
                 block_size: 0,
                 created_at,
                 id,
                 file_size: 1,
                 compression: crate::segment::meta::CompressionType::Lz4,
+                table_type: crate::segment::meta::TableType::Block,
                 item_count: 0,
                 key_count: 0,
                 key_range: KeyRange::new((vec![].into(), vec![].into())),
                 tombstone_count: 0,
+                range_tombstone_count: 0,
                 uncompressed_size: 0,
                 seqnos: (0, 0),
             },
@@ -120,7 +126,7 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let compactor = Strategy;
 
-        let levels = Levels::create_new(4, tempdir.path().join(LEVELS_MANIFEST_FILE))?;
+        let levels = LevelManifest::create_new(4, tempdir.path().join(LEVELS_MANIFEST_FILE))?;
 
         assert_eq!(
             compactor.choose(&levels, &PersistedConfig::default()),
@@ -135,9 +141,9 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let compactor = Strategy;
 
-        let mut levels = Levels::create_new(4, tempdir.path().join(LEVELS_MANIFEST_FILE))?;
+        let mut levels = LevelManifest::create_new(4, tempdir.path().join(LEVELS_MANIFEST_FILE))?;
         for id in 0..5 {
-            levels.add(fixture_segment(id.to_string().into(), id));
+            levels.add(fixture_segment(id, u128::from(id)));
         }
 
         assert_eq!(
@@ -153,16 +159,16 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let compactor = Strategy;
 
-        let mut levels = Levels::create_new(4, tempdir.path().join(LEVELS_MANIFEST_FILE))?;
+        let mut levels = LevelManifest::create_new(4, tempdir.path().join(LEVELS_MANIFEST_FILE))?;
         for id in 0..(L0_SEGMENT_CAP + 2) {
-            levels.add(fixture_segment(id.to_string().into(), id as u128));
+            levels.add(fixture_segment(id as u64, id as u128));
         }
 
         assert_eq!(
             compactor.choose(&levels, &PersistedConfig::default()),
             Choice::DoCompact(crate::compaction::Input {
                 dest_level: 0,
-                segment_ids: vec!["0".into(), "1".into(), "2".into()],
+                segment_ids: vec![0, 1, 2],
                 target_size: u64::MAX
             })
         );

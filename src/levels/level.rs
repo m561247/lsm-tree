@@ -1,138 +1,98 @@
-use super::HiddenSet;
-use crate::{key_range::KeyRange, segment::Segment};
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, ops::DerefMut, sync::Arc};
+use crate::{key_range::KeyRange, segment::meta::SegmentId, Segment};
+use std::sync::Arc;
 
-#[derive(Serialize, Deserialize)]
-pub struct Level(Vec<Arc<str>>);
+#[derive(Clone, Debug)]
+pub struct Level {
+    #[doc(hidden)]
+    pub segments: Vec<Arc<Segment>>,
 
-impl std::ops::Deref for Level {
-    type Target = Vec<Arc<str>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    pub is_disjoint: bool,
 }
 
-impl DerefMut for Level {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl std::ops::Deref for Level {
+    type Target = Vec<Arc<Segment>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.segments
     }
 }
 
 impl Default for Level {
     fn default() -> Self {
-        Self(Vec::with_capacity(10))
-    }
-}
-
-#[allow(clippy::module_name_repetitions)]
-pub struct ResolvedLevel(pub(crate) Vec<Arc<Segment>>);
-
-impl std::ops::Deref for ResolvedLevel {
-    type Target = Vec<Arc<Segment>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ResolvedLevel {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl ResolvedLevel {
-    pub fn new(
-        level: &Level,
-        hidden_set: &HiddenSet,
-        segments: &HashMap<Arc<str>, Arc<Segment>>,
-    ) -> Self {
-        let mut new_level = Vec::new();
-
-        for segment_id in level.iter() {
-            if !hidden_set.contains(segment_id) {
-                new_level.push(
-                    segments
-                        .get(segment_id)
-                        .cloned()
-                        .expect("where's the segment at?"),
-                );
-            }
+        Self {
+            is_disjoint: true,
+            segments: Vec::with_capacity(10),
         }
+    }
+}
 
-        Self(new_level)
+impl Level {
+    pub fn insert(&mut self, segment: Arc<Segment>) {
+        self.segments.push(segment);
+        self.sort_by_seqno();
+        self.set_disjoint_flag();
+    }
+
+    pub fn remove(&mut self, segment_id: SegmentId) {
+        self.segments.retain(|x| segment_id != x.metadata.id);
+        self.sort_by_seqno();
+        self.set_disjoint_flag();
+    }
+
+    pub fn sort_by_key_range(&mut self) {
+        self.segments
+            .sort_by(|a, b| a.metadata.key_range.0.cmp(&b.metadata.key_range.0));
+    }
+
+    /// Sorts the level from newest to oldest
+    ///
+    /// This will make segments with highest seqno get checked first,
+    /// so if there are two versions of an item, the fresher one is seen first:
+    ///
+    /// segment a   segment b
+    /// [key:asd:2] [key:asd:1]
+    ///
+    /// point read ----------->
+    pub fn sort_by_seqno(&mut self) {
+        self.segments
+            .sort_by(|a, b| b.metadata.seqnos.1.cmp(&a.metadata.seqnos.1));
+    }
+
+    pub fn ids(&self) -> Vec<SegmentId> {
+        self.segments.iter().map(|x| x.metadata.id).collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+
+    /// Gets the number of segments
+    pub fn len(&self) -> usize {
+        self.segments.len()
     }
 
     /// Gets the level (compressed) size in bytes
     pub fn size(&self) -> u64 {
-        self.iter().map(|x| x.metadata.file_size).sum()
+        self.segments.iter().map(|x| x.metadata.file_size).sum()
     }
 
-    // TODO: unit tests
-    pub fn is_disjunct(&self) -> bool {
-        for i in 0..self.0.len() {
-            for j in i + 1..self.0.len() {
-                let segment1 = &self.0.get(i).expect("should exist");
-                let segment2 = &self.0.get(j).expect("should exist");
+    /// Checks if the level is disjoint and caches the result in `is_disjoint`
+    fn set_disjoint_flag(&mut self) {
+        let ranges = self
+            .segments
+            .iter()
+            .map(|x| &x.metadata.key_range)
+            .cloned()
+            .collect::<Vec<_>>();
 
-                if segment1
-                    .metadata
-                    .key_range
-                    .overlaps_with_key_range(&segment2.metadata.key_range)
-                {
-                    return false;
-                }
-            }
-        }
-
-        true
+        self.is_disjoint = KeyRange::is_disjoint(&ranges);
     }
 
-    pub fn get_overlapping_segments(&self, key_range: &KeyRange) -> Vec<Arc<str>> {
-        self.0
+    pub fn get_overlapping_segments(&self, key_range: &KeyRange) -> Vec<SegmentId> {
+        self.segments
             .iter()
             .filter(|x| x.metadata.key_range.overlaps_with_key_range(key_range))
-            .map(|x| &x.metadata.id)
-            .cloned()
+            .map(|x| x.metadata.id)
             .collect()
     }
 }
-
-/*
-// Helper function to check if two segments are disjoint
-fn is_disjoint(a: (UserKey, UserKey), b: (UserKey, UserKey)) -> bool {
-    use std::ops::Bound::Included;
-
-    let (start, end) = b.clone();
-    let bounds = (Included(start), Included(end));
-
-    segment1.check_key_range_overlap(&bounds)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_disjoint_segments_disjoint() {
-        // Create two disjoint segments
-        let segment1 = Arc::new(Segment { start: 0, end: 5 });
-        let segment2 = Arc::new(Segment { start: 6, end: 10 });
-
-        // Check if they are disjoint
-        assert!(is_disjoint(&segment1, &segment2));
-    }
-
-    #[test]
-    fn test_is_disjoint_segments_overlap() {
-        // Create two overlapping segments
-        let segment1 = Arc::new(Segment { start: 0, end: 5 });
-        let segment2 = Arc::new(Segment { start: 3, end: 7 });
-
-        // Check if they are disjoint
-        assert!(!is_disjoint(&segment1, &segment2));
-    }
-}
- */

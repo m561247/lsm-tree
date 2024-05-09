@@ -1,5 +1,5 @@
 use super::{Choice, CompactionStrategy, Input as CompactionInput};
-use crate::{config::PersistedConfig, levels::Levels};
+use crate::{config::PersistedConfig, levels::LevelManifest};
 
 /// Major compaction
 ///
@@ -17,7 +17,7 @@ impl Strategy {
     #[must_use]
     #[allow(dead_code)]
     pub fn new(target_size: u64) -> Self {
-        assert!(target_size >= 1024);
+        assert!(target_size >= 1_024);
         Self { target_size }
     }
 }
@@ -31,9 +31,8 @@ impl Default for Strategy {
 }
 
 impl CompactionStrategy for Strategy {
-    fn choose(&self, levels: &Levels, _: &PersistedConfig) -> Choice {
-        let segments = levels.get_segments();
-        let segment_ids = segments.values().map(|s| s.metadata.id.clone()).collect();
+    fn choose(&self, levels: &LevelManifest, _: &PersistedConfig) -> Choice {
+        let segment_ids = levels.iter().map(|x| x.metadata.id).collect();
 
         Choice::DoCompact(CompactionInput {
             segment_ids,

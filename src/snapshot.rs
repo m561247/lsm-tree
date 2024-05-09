@@ -12,10 +12,13 @@ use std::{
     },
 };
 
-#[derive(Clone, Debug, Default)]
-pub struct SnapshotCounter(Arc<AtomicU32>);
+// TODO: merge this and seqno generator into new AtomicCounter
+// and create newtypes
 
-impl std::ops::Deref for SnapshotCounter {
+#[derive(Clone, Debug, Default)]
+pub struct Counter(Arc<AtomicU32>);
+
+impl std::ops::Deref for Counter {
     type Target = Arc<AtomicU32>;
 
     fn deref(&self) -> &Self::Target {
@@ -23,7 +26,7 @@ impl std::ops::Deref for SnapshotCounter {
     }
 }
 
-impl SnapshotCounter {
+impl Counter {
     pub fn increment(&self) -> u32 {
         self.fetch_add(1, atomic::Ordering::Release)
     }
@@ -336,8 +339,15 @@ impl Snapshot {
     ///
     /// Will return `Err` if an IO error occurs.
     pub fn len(&self) -> crate::Result<usize> {
-        // TODO: shouldn't use block cache
-        Ok(self.iter().into_iter().filter(Result::is_ok).count())
+        let mut count = 0;
+
+        // TODO: shouldn't thrash block cache
+        for item in &self.iter() {
+            let _ = item?;
+            count += 1;
+        }
+
+        Ok(count)
     }
 }
 

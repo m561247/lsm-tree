@@ -7,8 +7,7 @@ pub(crate) mod major;
 pub(crate) mod tiered;
 pub(crate) mod worker;
 
-use crate::{config::PersistedConfig, levels::Levels};
-use std::sync::Arc;
+use crate::{config::PersistedConfig, levels::LevelManifest, segment::meta::SegmentId};
 
 /// Input for compactor.
 ///
@@ -17,7 +16,7 @@ use std::sync::Arc;
 #[derive(Debug, Eq, PartialEq)]
 pub struct Input {
     /// Segments to compact
-    pub segment_ids: Vec<Arc<str>>,
+    pub segment_ids: Vec<SegmentId>,
 
     /// Level to put the created segments into
     pub dest_level: u8,
@@ -42,7 +41,7 @@ pub enum Choice {
     ///
     /// This may be used by a compaction strategy that wants to delete old data
     /// without having to compact it away, like [`fifo::Strategy`].
-    DeleteSegments(Vec<Arc<str>>),
+    DeleteSegments(Vec<SegmentId>),
 }
 
 /// Trait for a compaction strategy
@@ -52,7 +51,7 @@ pub enum Choice {
 #[allow(clippy::module_name_repetitions)]
 pub trait CompactionStrategy {
     /// Decides on what to do based on the current state of the LSM-tree's levels
-    fn choose(&self, _: &Levels, config: &PersistedConfig) -> Choice;
+    fn choose(&self, _: &LevelManifest, config: &PersistedConfig) -> Choice;
 }
 
 pub use fifo::Strategy as Fifo;

@@ -1,8 +1,6 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use serde::{Deserialize, Serialize};
-use std::io::Cursor;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Version {
     V0,
     // V1,
@@ -47,9 +45,9 @@ impl Version {
 
             let mut bytes = [0; 2];
             bytes.copy_from_slice(next_two);
-            let mut cursor = Cursor::new(&bytes);
+            let mut bytes: &[u8] = &bytes;
 
-            let value = cursor.read_u16::<BigEndian>().ok()?;
+            let value = bytes.read_u16::<BigEndian>().ok()?;
             let version = Self::try_from(value).ok()?;
 
             Some(version)
@@ -72,20 +70,42 @@ mod tests {
 
     #[test]
     #[allow(clippy::expect_used)]
-    pub fn version_round_trip() {
-        let mut buf = vec![];
-        Version::V0.write_file_header(&mut buf).expect("can't fail");
-
-        let version = Version::parse_file_header(&buf).expect("should parse");
-        assert_eq!(version, Version::V0);
+    pub fn version_serialize() -> crate::Result<()> {
+        let mut bytes = vec![];
+        Version::V0.write_file_header(&mut bytes)?;
+        assert_eq!(bytes, &[b'L', b'S', b'M', 0, 0]);
+        Ok(())
     }
 
     #[test]
     #[allow(clippy::expect_used)]
-    pub fn test_version_len() {
+    pub fn version_deserialize_success() {
+        let version = Version::parse_file_header(&[b'L', b'S', b'M', 0, 0]);
+        assert_eq!(version, Some(Version::V0));
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    pub fn version_deserialize_fail() {
+        let version = Version::parse_file_header(&[b'L', b'S', b'X', 0, 0]);
+        assert!(version.is_none());
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    pub fn version_serde_round_trip() {
+        let mut buf = vec![];
+        Version::V0.write_file_header(&mut buf).expect("can't fail");
+
+        let version = Version::parse_file_header(&buf);
+        assert_eq!(version, Some(Version::V0));
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    pub fn version_len() {
         let mut buf = vec![];
         let size = Version::V0.write_file_header(&mut buf).expect("can't fail");
-
         assert_eq!(Version::len() as usize, size);
     }
 }

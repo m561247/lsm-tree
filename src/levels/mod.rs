@@ -1,3 +1,4 @@
+pub mod iter;
 mod level;
 
 #[cfg(feature = "segment_history")]
@@ -5,27 +6,29 @@ mod segment_history;
 
 #[cfg(feature = "segment_history")]
 use crate::time::unix_timestamp;
-#[cfg(feature = "segment_history")]
-use serde_json::json;
 
-use self::level::{Level, ResolvedLevel};
-use crate::{file::rewrite_atomic, segment::Segment};
+use self::level::Level;
+use crate::{
+    file::rewrite_atomic,
+    segment::{meta::SegmentId, Segment},
+};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use iter::LevelManifestIterator;
 use std::{
     collections::{HashMap, HashSet},
-    fs::{self},
+    io::Cursor,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-pub type HiddenSet = HashSet<Arc<str>>;
-pub type ResolvedView = Vec<ResolvedLevel>;
+pub type HiddenSet = HashSet<SegmentId>;
 
 /// Represents the levels of a log-structured merge tree.
-pub struct Levels {
+pub struct LevelManifest {
     path: PathBuf,
 
-    segments: HashMap<Arc<str>, Arc<Segment>>,
-    levels: Vec<Level>,
+    #[doc(hidden)]
+    pub levels: Vec<Level>,
 
     /// Set of segment IDs that are masked
     ///
@@ -37,7 +40,7 @@ pub struct Levels {
     segment_history_writer: segment_history::Writer,
 }
 
-impl Levels {
+impl LevelManifest {
     pub(crate) fn is_compacting(&self) -> bool {
         !self.hidden_set.is_empty()
     }
@@ -51,7 +54,6 @@ impl Levels {
 
         let mut levels = Self {
             path: path.as_ref().to_path_buf(),
-            segments: HashMap::with_capacity(100),
             levels,
             hidden_set: HashSet::with_capacity(10),
 
@@ -68,20 +70,17 @@ impl Levels {
 
     #[cfg(feature = "segment_history")]
     fn write_segment_history_entry(&mut self, event: &str) -> crate::Result<()> {
-        let segment_map = self.get_all_segments();
         let ts = unix_timestamp();
 
-        let line = serde_json::to_string(&json!({
+        let line = serde_json::to_string(&serde_json::json!({
             "time_unix": ts.as_secs(),
             "time_ms": ts.as_millis(),
             "event": event,
             "levels": self.levels.iter().map(|level| {
-                let segments = level.iter().map(|seg_id| segment_map[seg_id].clone()).collect::<Vec<_>>();
-
-                segments
+                level.segments
                 .iter()
-                .map(|segment| json!({
-                        "path": segment.metadata.path.clone(),
+                .map(|segment| serde_json::json!({
+                        "id": segment.metadata.id,
                         "metadata": segment.metadata.clone(),
                         "hidden": self.hidden_set.contains(&segment.metadata.id)
                     }))
@@ -93,28 +92,73 @@ impl Levels {
         self.segment_history_writer.write(&line)
     }
 
-    pub(crate) fn recover_ids<P: AsRef<Path>>(path: P) -> crate::Result<Vec<Arc<str>>> {
-        let level_manifest = fs::read_to_string(&path)?;
-        let levels: Vec<Level> = serde_json::from_str(&level_manifest).expect("deserialize error");
-        Ok(levels.iter().flat_map(|f| &**f).cloned().collect())
+    pub(crate) fn load_level_manifest<P: AsRef<Path>>(
+        path: P,
+    ) -> crate::Result<Vec<Vec<SegmentId>>> {
+        let mut level_manifest = Cursor::new(std::fs::read(&path)?);
+
+        let mut levels = vec![];
+
+        let level_count = level_manifest.read_u32::<BigEndian>()?;
+
+        for _ in 0..level_count {
+            let mut level = vec![];
+            let segment_count = level_manifest.read_u32::<BigEndian>()?;
+
+            for _ in 0..segment_count {
+                let id = level_manifest.read_u64::<BigEndian>()?;
+                level.push(id);
+            }
+
+            levels.push(level);
+        }
+
+        Ok(levels)
+    }
+
+    pub(crate) fn recover_ids<P: AsRef<Path>>(path: P) -> crate::Result<Vec<SegmentId>> {
+        Ok(Self::load_level_manifest(path)?
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
+    fn resolve_levels(
+        level_manifest: Vec<Vec<SegmentId>>,
+        segments: &HashMap<SegmentId, Arc<Segment>>,
+    ) -> Vec<Level> {
+        let mut levels = Vec::with_capacity(level_manifest.len());
+
+        for level in level_manifest {
+            let mut created_level = Level::default();
+
+            for id in level {
+                let segment = segments.get(&id).cloned().expect("should find segment");
+                created_level.insert(segment);
+            }
+
+            levels.push(created_level);
+        }
+
+        levels
     }
 
     pub(crate) fn recover<P: AsRef<Path>>(
         path: P,
         segments: Vec<Arc<Segment>>,
     ) -> crate::Result<Self> {
-        let level_manifest = fs::read_to_string(&path)?;
-        let levels: Vec<_> = serde_json::from_str(&level_manifest).expect("deserialize error");
+        let level_manifest = Self::load_level_manifest(&path)?;
 
-        let segments = segments
+        let segments: HashMap<_, _> = segments
             .into_iter()
-            .map(|seg| (seg.metadata.id.clone(), seg))
+            .map(|seg| (seg.metadata.id, seg))
             .collect();
+
+        let levels = Self::resolve_levels(level_manifest, &segments);
 
         // NOTE: See segment_history feature
         #[allow(unused_mut)]
         let mut levels = Self {
-            segments,
             levels,
             hidden_set: HashSet::with_capacity(10),
             path: path.as_ref().to_path_buf(),
@@ -130,11 +174,18 @@ impl Levels {
     }
 
     pub(crate) fn write_to_disk(&mut self) -> crate::Result<()> {
-        log::trace!("Writing level manifest to {}", self.path.display());
+        log::trace!("Writing level manifest to {:?}", self.path);
 
-        // NOTE: Serialization can't fail here
-        #[allow(clippy::expect_used)]
-        let json = serde_json::to_string_pretty(&self.levels).expect("should serialize");
+        let mut serialized = vec![];
+        serialized.write_u32::<BigEndian>(self.levels.len() as u32)?;
+
+        for level in &self.levels {
+            serialized.write_u32::<BigEndian>(level.segments.len() as u32)?;
+
+            for segment in &level.segments {
+                serialized.write_u64::<BigEndian>(segment.metadata.id)?;
+            }
+        }
 
         // NOTE: Compaction threads don't have concurrent access to the level manifest
         // because it is behind a mutex
@@ -143,7 +194,7 @@ impl Levels {
         //
         // a) truncating is not an option, because for a short moment, the file is empty
         // b) just overwriting corrupts the file content
-        rewrite_atomic(&self.path, json.as_bytes())?;
+        rewrite_atomic(&self.path, &serialized)?;
 
         Ok(())
     }
@@ -163,11 +214,7 @@ impl Levels {
     /// point read ----------->
     pub(crate) fn sort_levels(&mut self) {
         for level in &mut self.levels {
-            level.sort_by(|a, b| {
-                let seg_a = self.segments.get(a).expect("where's the segment at");
-                let seg_b = self.segments.get(b).expect("where's the segment at");
-                seg_b.metadata.seqnos.1.cmp(&seg_a.metadata.seqnos.1)
-            });
+            level.sort_by_seqno();
         }
     }
 
@@ -180,20 +227,16 @@ impl Levels {
             .get_mut(index as usize)
             .expect("level should exist");
 
-        level.push(segment.metadata.id.clone());
-        self.segments.insert(segment.metadata.id.clone(), segment);
-
-        self.sort_levels();
+        level.insert(segment);
 
         #[cfg(feature = "segment_history")]
         self.write_segment_history_entry("insert").ok();
     }
 
-    pub(crate) fn remove(&mut self, segment_id: &Arc<str>) {
+    pub(crate) fn remove(&mut self, segment_id: SegmentId) {
         for level in &mut self.levels {
-            level.retain(|x| segment_id != x);
+            level.remove(segment_id);
         }
-        self.segments.remove(segment_id);
 
         #[cfg(feature = "segment_history")]
         self.write_segment_history_entry("remove").ok();
@@ -211,6 +254,7 @@ impl Levels {
         self.levels.len() as u8
     }
 
+    #[must_use]
     pub fn first_level_segment_count(&self) -> usize {
         self.levels.first().expect("L0 should always exist").len()
     }
@@ -224,24 +268,22 @@ impl Levels {
     /// Returns the amount of segments, summed over all levels
     #[must_use]
     pub fn len(&self) -> usize {
-        self.levels.iter().map(|level| level.len()).sum()
+        self.levels.iter().map(Level::len).sum()
     }
 
     /// Returns the (compressed) size of all segments
     #[must_use]
     pub fn size(&self) -> u64 {
-        self.get_all_segments_flattened()
-            .iter()
-            .map(|s| s.metadata.file_size)
-            .sum()
+        self.iter().map(|s| s.metadata.file_size).sum()
     }
 
+    #[must_use]
     pub fn busy_levels(&self) -> HashSet<u8> {
         let mut output = HashSet::with_capacity(self.len());
 
         for (idx, level) in self.levels.iter().enumerate() {
-            for segment_id in level.iter() {
-                if self.hidden_set.contains(segment_id) {
+            for segment_id in level.ids() {
+                if self.hidden_set.contains(&segment_id) {
                     output.insert(idx as u8);
                 }
             }
@@ -250,58 +292,52 @@ impl Levels {
         output
     }
 
-    /// Returns a view into the levels
-    /// hiding all segments that currently are being compacted
+    /// Returns a view into the levels, hiding all segments that currently are being compacted
     #[must_use]
-    pub fn resolved_view(&self) -> ResolvedView {
+    pub fn resolved_view(&self) -> Vec<Level> {
         let mut output = Vec::with_capacity(self.len());
 
         for raw_level in &self.levels {
-            output.push(ResolvedLevel::new(
-                raw_level,
-                &self.hidden_set,
-                &self.segments,
-            ));
+            let mut level = raw_level.clone();
+
+            for id in &self.hidden_set {
+                level.remove(*id);
+            }
+
+            output.push(level);
         }
 
         output
     }
 
-    pub(crate) fn get_all_segments_flattened(&self) -> Vec<Arc<Segment>> {
-        let mut output = Vec::with_capacity(self.len());
+    #[must_use]
+    pub fn iter(&self) -> LevelManifestIterator {
+        LevelManifestIterator::new(self)
+    }
 
-        for level in &self.levels {
-            for segment_id in level.iter() {
-                output.push(
-                    self.segments
-                        .get(segment_id)
-                        .cloned()
-                        .expect("where's the segment at?"),
-                );
+    pub(crate) fn get_all_segments(&self) -> HashMap<SegmentId, Arc<Segment>> {
+        let mut output = HashMap::new();
+
+        for segment in self.iter() {
+            output.insert(segment.metadata.id, segment);
+        }
+
+        output
+    }
+
+    pub(crate) fn get_visible_segments(&self) -> HashMap<SegmentId, Arc<Segment>> {
+        let mut output = HashMap::new();
+
+        for segment in self.iter() {
+            if !self.hidden_set.contains(&segment.metadata.id) {
+                output.insert(segment.metadata.id, segment);
             }
         }
 
         output
     }
 
-    pub(crate) fn get_all_segments(&self) -> HashMap<Arc<str>, Arc<Segment>> {
-        let mut output = HashMap::new();
-
-        for segment in self.get_all_segments_flattened() {
-            output.insert(segment.metadata.id.clone(), segment);
-        }
-
-        output
-    }
-
-    pub(crate) fn get_segments(&self) -> HashMap<Arc<str>, Arc<Segment>> {
-        self.get_all_segments()
-            .into_iter()
-            .filter(|(key, _)| !self.hidden_set.contains(key))
-            .collect()
-    }
-
-    pub(crate) fn show_segments(&mut self, keys: &[Arc<str>]) {
+    pub(crate) fn show_segments(&mut self, keys: &[SegmentId]) {
         for key in keys {
             self.hidden_set.remove(key);
         }
@@ -310,9 +346,9 @@ impl Levels {
         self.write_segment_history_entry("show").ok();
     }
 
-    pub(crate) fn hide_segments(&mut self, keys: &[Arc<str>]) {
+    pub(crate) fn hide_segments(&mut self, keys: &[SegmentId]) {
         for key in keys {
-            self.hidden_set.insert(key.clone());
+            self.hidden_set.insert(*key);
         }
 
         #[cfg(feature = "segment_history")]
@@ -322,12 +358,17 @@ impl Levels {
 
 #[cfg(test)]
 mod tests {
-    use super::ResolvedLevel;
     use crate::{
         block_cache::BlockCache,
         descriptor_table::FileDescriptorTable,
         key_range::KeyRange,
-        segment::{block_index::BlockIndex, meta::Metadata, Segment},
+        levels::level::Level,
+        segment::{
+            block_index::BlockIndex,
+            meta::{Metadata, SegmentId},
+            Segment,
+        },
+        AbstractTree,
     };
     use std::sync::Arc;
 
@@ -335,24 +376,27 @@ mod tests {
     use crate::bloom::BloomFilter;
 
     #[allow(clippy::expect_used)]
-    fn fixture_segment(id: Arc<str>, key_range: KeyRange) -> Arc<Segment> {
+    fn fixture_segment(id: SegmentId, key_range: KeyRange) -> Arc<Segment> {
         let block_cache = Arc::new(BlockCache::with_capacity_bytes(10 * 1_024 * 1_024));
 
         Arc::new(Segment {
+            tree_id: 0,
             descriptor_table: Arc::new(FileDescriptorTable::new(512, 1)),
-            block_index: Arc::new(BlockIndex::new(id.clone(), block_cache.clone())),
+            block_index: Arc::new(BlockIndex::new((0, id).into(), block_cache.clone())),
             metadata: Metadata {
-                version: crate::version::Version::V0,
+                // version: crate::version::Version::V0,
                 block_count: 0,
                 block_size: 0,
                 created_at: 0,
                 id,
                 file_size: 0,
                 compression: crate::segment::meta::CompressionType::Lz4,
+                table_type: crate::segment::meta::TableType::Block,
                 item_count: 0,
                 key_count: 0,
                 key_range,
                 tombstone_count: 0,
+                range_tombstone_count: 0,
                 uncompressed_size: 0,
                 seqnos: (0, 0),
             },
@@ -364,20 +408,78 @@ mod tests {
     }
 
     #[test]
+    fn level_disjoint() -> crate::Result<()> {
+        let folder = tempfile::tempdir()?;
+
+        let tree = crate::Config::new(&folder).open()?;
+
+        let mut x = 0_u64;
+
+        for _ in 0..10 {
+            for _ in 0..10 {
+                let key = x.to_be_bytes();
+                x += 1;
+                tree.insert(key, key, 0);
+            }
+            tree.flush_active_memtable().expect("should flush");
+        }
+
+        assert!(
+            tree.levels
+                .read()
+                .expect("lock is poisoned")
+                .levels
+                .first()
+                .expect("should exist")
+                .is_disjoint
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn level_not_disjoint() -> crate::Result<()> {
+        let folder = tempfile::tempdir()?;
+
+        let tree = crate::Config::new(&folder).open()?;
+
+        for i in 0..10 {
+            tree.insert("a", "", i);
+            tree.insert("z", "", i);
+            tree.flush_active_memtable().expect("should flush");
+        }
+
+        assert!(
+            !tree
+                .levels
+                .read()
+                .expect("lock is poisoned")
+                .levels
+                .first()
+                .expect("should exist")
+                .is_disjoint
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn level_overlaps() {
         let seg0 = fixture_segment(
-            "1".into(),
+            1,
             KeyRange::new((b"c".to_vec().into(), b"k".to_vec().into())),
         );
         let seg1 = fixture_segment(
-            "2".into(),
+            2,
             KeyRange::new((b"l".to_vec().into(), b"z".to_vec().into())),
         );
 
-        let level = ResolvedLevel(vec![seg0, seg1]);
+        let mut level = Level::default();
+        level.insert(seg0);
+        level.insert(seg1);
 
         assert_eq!(
-            Vec::<Arc<str>>::new(),
+            Vec::<SegmentId>::new(),
             level.get_overlapping_segments(&KeyRange::new((
                 b"a".to_vec().into(),
                 b"b".to_vec().into()
@@ -385,7 +487,7 @@ mod tests {
         );
 
         assert_eq!(
-            vec![Arc::<str>::from("1")],
+            vec![1],
             level.get_overlapping_segments(&KeyRange::new((
                 b"d".to_vec().into(),
                 b"k".to_vec().into()
@@ -393,7 +495,7 @@ mod tests {
         );
 
         assert_eq!(
-            vec![Arc::<str>::from("1"), Arc::<str>::from("2")],
+            vec![1, 2],
             level.get_overlapping_segments(&KeyRange::new((
                 b"f".to_vec().into(),
                 b"x".to_vec().into()
