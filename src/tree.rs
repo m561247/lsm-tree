@@ -4,7 +4,8 @@ use crate::{
     descriptor_table::FileDescriptorTable,
     levels::LevelManifest,
     memtable::MemTable,
-    range::{Mapper, Range},
+    prefix::Prefix,
+    range::{Mapper, MemTableGuard, Range},
     segment::Segment,
     serde::{Deserializable, Serializable},
     stop_signal::StopSignal,
@@ -57,7 +58,7 @@ impl AbstractTree for Tree {
     }
 
     fn get<K: AsRef<[u8]>>(&self, key: K) -> crate::Result<Option<UserValue>> {
-        Self::get(self, key)
+        Ok(self.get_internal_entry(key, true, None)?.map(|x| x.value))
     }
 
     fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V, seqno: SeqNo) -> (u32, u32) {
@@ -329,74 +330,6 @@ impl Tree {
         memtable_lock.insert(id, memtable);
     }
 
-    /* /// Scans the entire tree, returning the amount of items.
-    ///
-    /// ###### Caution
-    ///
-    /// This operation scans the entire tree: O(n) complexity!
-    ///
-    /// Never, under any circumstances, use .`len()` == 0 to check
-    /// if the tree is empty, use [`Tree::is_empty`] instead.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use lsm_tree::Error as TreeError;
-    /// use lsm_tree::{AbstractTree, Config, Tree};
-    ///
-    /// let folder = tempfile::tempdir()?;
-    /// let tree = Config::new(folder).open()?;
-    ///
-    /// assert_eq!(tree.len()?, 0);
-    /// tree.insert("1", "abc", 0);
-    /// tree.insert("3", "abc", 1);
-    /// tree.insert("5", "abc", 2);
-    /// assert_eq!(tree.len()?, 3);
-    /// #
-    /// # Ok::<(), TreeError>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn len(&self) -> crate::Result<usize> {
-        let mut count = 0;
-
-        // TODO: shouldn't thrash block cache
-        for item in &self.iter() {
-            let _ = item?;
-            count += 1;
-        }
-
-        Ok(count)
-    } */
-
-    /*  /// Returns `true` if the tree is empty.
-    ///
-    /// This operation has O(1) complexity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{AbstractTree, Config, Tree};
-    ///
-    /// let tree = Config::new(folder).open()?;
-    /// assert!(tree.is_empty()?);
-    ///
-    /// tree.insert("a", "abc", 0);
-    /// assert!(!tree.is_empty()?);
-    /// #
-    /// # Ok::<(), lsm_tree::Error>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn is_empty(&self) -> crate::Result<bool> {
-        self.first_key_value().map(|x| x.is_none())
-    } */
-
     #[doc(hidden)]
     pub fn get_internal_entry<K: AsRef<[u8]>>(
         &self,
@@ -441,7 +374,7 @@ impl Tree {
         Ok(None)
     }
 
-    /// Retrieves an item from the tree.
+    /* /// Retrieves an item from the tree.
     ///
     /// # Examples
     ///
@@ -463,69 +396,6 @@ impl Tree {
     /// Will return `Err` if an IO error occurs.
     pub fn get<K: AsRef<[u8]>>(&self, key: K) -> crate::Result<Option<UserValue>> {
         Ok(self.get_internal_entry(key, true, None)?.map(|x| x.value))
-    }
-
-    /* /// Inserts a key-value pair into the tree.
-    ///
-    /// If the key already exists, the item will be overwritten.
-    ///
-    /// Returns the added item's size and new size of the memtable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{AbstractTree, Config, Tree};
-    ///
-    /// let tree = Config::new(folder).open()?;
-    /// tree.insert("a", "abc", 0);
-    /// #
-    /// # Ok::<(), lsm_tree::Error>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
-        &self,
-        key: K,
-        value: V,
-        seqno: SeqNo,
-    ) -> (u32, u32) {
-        let value = Value::new(key.as_ref(), value.as_ref(), seqno, ValueType::Value);
-        self.append_entry(value)
-    } */
-
-    /* /// Removes an item from the tree.
-    ///
-    /// Returns the added item's size and new size of the memtable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # let folder = tempfile::tempdir()?;
-    /// # use lsm_tree::{AbstractTree, Config, Tree};
-    /// #
-    /// # let tree = Config::new(folder).open()?;
-    /// tree.insert("a", "abc", 0);
-    ///
-    /// let item = tree.get("a")?.expect("should have item");
-    /// assert_eq!("abc".as_bytes(), &*item);
-    ///
-    /// tree.remove("a", 1);
-    ///
-    /// let item = tree.get("a")?;
-    /// assert_eq!(None, item);
-    /// #
-    /// # Ok::<(), lsm_tree::Error>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn remove<K: AsRef<[u8]>>(&self, key: K, seqno: SeqNo) -> (u32, u32) {
-        let value = Value::new(key.as_ref(), vec![], seqno, ValueType::Tombstone);
-        self.append_entry(value)
     } */
 
     /// Returns `true` if the tree contains the specified key.
@@ -551,39 +421,6 @@ impl Tree {
     pub fn contains_key<K: AsRef<[u8]>>(&self, key: K) -> crate::Result<bool> {
         self.get(key).map(|x| x.is_some())
     }
-
-    /* pub(crate) fn create_iter(&self, seqno: Option<SeqNo>) -> Range {
-        self.create_range::<UserKey, _>(.., seqno)
-    } */
-
-    /* /// Returns an iterator that scans through the entire tree.
-    ///
-    /// Avoid using this function, or limit it as otherwise it may scan a lot of items.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{AbstractTree, Config, Tree};
-    ///
-    /// let tree = Config::new(folder).open()?;
-    ///
-    /// tree.insert("a", "abc", 0);
-    /// tree.insert("f", "abc", 1);
-    /// tree.insert("g", "abc", 2);
-    /// assert_eq!(3, tree.iter().into_iter().count());
-    /// #
-    /// # Ok::<(), lsm_tree::Error>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    #[allow(clippy::iter_not_returning_iterator)]
-    #[must_use]
-    pub fn iter(&self) -> Range {
-        self.create_iter(None)
-    } */
 
     pub(crate) fn create_range<K: AsRef<[u8]>, R: RangeBounds<K>>(
         &self,
@@ -621,7 +458,7 @@ impl Tree {
         )
     }
 
-    /*   pub(crate) fn create_prefix<K: Into<UserKey>>(
+    pub(crate) fn create_prefix<K: Into<UserKey>>(
         &self,
         prefix: K,
         seqno: Option<SeqNo>,
@@ -639,9 +476,9 @@ impl Tree {
             seqno,
             self.levels.clone(),
         )
-    } */
+    }
 
-    /*  /// Returns an iterator over a prefixed set of items.
+    /// Returns an iterator over a prefixed set of items.
     ///
     /// Avoid using an empty prefix as it may scan a lot of items (unless limited).
     ///
@@ -666,65 +503,7 @@ impl Tree {
     /// Will return `Err` if an IO error occurs.
     pub fn prefix<K: AsRef<[u8]>>(&self, prefix: K) -> Prefix {
         self.create_prefix(prefix.as_ref(), None)
-    } */
-
-    /*  /// Returns the first key-value pair in the tree.
-    /// The key in this pair is the minimum key in the tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use lsm_tree::Error as TreeError;
-    /// # use lsm_tree::{AbstractTree, Config, Tree};
-    /// #
-    /// # let folder = tempfile::tempdir()?;
-    /// let tree = Config::new(folder).open()?;
-    ///
-    /// tree.insert("1", "abc", 0);
-    /// tree.insert("3", "abc", 1);
-    /// tree.insert("5", "abc", 2);
-    ///
-    /// let (key, _) = tree.first_key_value()?.expect("item should exist");
-    /// assert_eq!(&*key, "1".as_bytes());
-    /// #
-    /// # Ok::<(), TreeError>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn first_key_value(&self) -> crate::Result<Option<(UserKey, UserValue)>> {
-        self.iter().into_iter().next().transpose()
-    } */
-
-    /*  /// Returns the last key-value pair in the tree.
-    /// The key in this pair is the maximum key in the tree.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use lsm_tree::Error as TreeError;
-    /// # use lsm_tree::{AbstractTree, Config, Tree};
-    /// #
-    /// # let folder = tempfile::tempdir()?;
-    /// # let tree = Config::new(folder).open()?;
-    /// #
-    /// tree.insert("1", "abc", 0);
-    /// tree.insert("3", "abc", 1);
-    /// tree.insert("5", "abc", 2);
-    ///
-    /// let (key, _) = tree.last_key_value()?.expect("item should exist");
-    /// assert_eq!(&*key, "5".as_bytes());
-    /// #
-    /// # Ok::<(), TreeError>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn last_key_value(&self) -> crate::Result<Option<(UserKey, UserValue)>> {
-        self.iter().into_iter().next_back().transpose()
-    } */
+    }
 
     /// Adds an item to the active memtable.
     ///
