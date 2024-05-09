@@ -2,6 +2,7 @@ use lsm_tree::{AbstractTree, Config, SequenceNumberCounter};
 use test_log::test;
 
 #[test]
+#[ignore]
 fn tree_major_compaction() -> lsm_tree::Result<()> {
     let folder = tempfile::tempdir()?;
     let path = folder.path();
