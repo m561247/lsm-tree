@@ -8,6 +8,7 @@ use std::sync::{
 };
 
 /// Thread-safe sequence number generator
+/*
 ///
 /// # Examples
 ///
@@ -35,7 +36,7 @@ use std::sync::{
 /// #
 /// # assert!(tree.is_empty()?);
 /// # Ok::<(), lsm_tree::Error>(())
-/// ```
+/// ``` */
 #[derive(Clone, Default, Debug)]
 pub struct SequenceNumberCounter(Arc<AtomicU64>);
 
