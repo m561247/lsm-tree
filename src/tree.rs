@@ -10,14 +10,12 @@ use crate::{
     id::generate_segment_id,
     levels::Levels,
     memtable::MemTable,
-    prefix::Prefix,
-    range::{MemTableGuard, Range},
+    range::{Mapper, Range},
     segment::Segment,
-    snapshot::SnapshotCounter,
     stop_signal::StopSignal,
     tree_inner::{SealedMemtables, TreeInner},
     version::Version,
-    AbstractTree, BlockCache, SeqNo, Snapshot, UserKey, UserValue, Value, ValueType,
+    AbstractTree, BlockCache, SeqNo, UserKey, UserValue, Value, ValueType,
 };
 use std::{
     io::Write,
@@ -46,7 +44,23 @@ impl std::ops::Deref for Tree {
     }
 }
 
+struct IdentityMapper;
+
+impl Mapper for IdentityMapper {
+    fn map(
+        &self,
+        item: crate::r#abstract::RangeItem,
+        _seqno: Option<SeqNo>,
+    ) -> Option<crate::r#abstract::RangeItem> {
+        Some(item)
+    }
+}
+
 impl AbstractTree for Tree {
+    fn range<'a, K: AsRef<[u8]>, R: RangeBounds<K>>(&self, range: R) -> Range {
+        self.create_range(range, None, Box::new(IdentityMapper))
+    }
+
     fn get<K: AsRef<[u8]>>(&self, key: K) -> crate::Result<Option<UserValue>> {
         Self::get(self, key)
     }
@@ -101,7 +115,7 @@ impl Tree {
             config: self.config.clone(),
             sealed_memtables: self.sealed_memtables.clone(),
             levels: self.levels.clone(),
-            open_snapshots: self.open_snapshots.clone(),
+            /*   open_snapshots: self.open_snapshots.clone(), */
             stop_signal: self.stop_signal.clone(),
             block_cache: self.block_cache.clone(),
             strategy,
@@ -130,7 +144,7 @@ impl Tree {
         self.compact(strategy)
     }
 
-    /// Opens a read-only point-in-time snapshot of the tree
+    /*   /// Opens a read-only point-in-time snapshot of the tree
     ///
     /// Dropping the snapshot will close the snapshot
     ///
@@ -160,7 +174,7 @@ impl Tree {
     #[must_use]
     pub fn snapshot(&self, seqno: SeqNo) -> Snapshot {
         Snapshot::new(self.clone(), seqno)
-    }
+    } */
 
     /// Atomically registers flushed disk segments into the tree, removing their associated sealed memtables
     pub fn register_segments(&self, segments: &[Arc<Segment>]) -> crate::Result<()> {
@@ -327,7 +341,7 @@ impl Tree {
         memtable_lock.insert(id, memtable);
     }
 
-    /// Scans the entire tree, returning the amount of items.
+    /* /// Scans the entire tree, returning the amount of items.
     ///
     /// ###### Caution
     ///
@@ -367,9 +381,9 @@ impl Tree {
         }
 
         Ok(count)
-    }
+    } */
 
-    /// Returns `true` if the tree is empty.
+    /*  /// Returns `true` if the tree is empty.
     ///
     /// This operation has O(1) complexity.
     ///
@@ -393,7 +407,7 @@ impl Tree {
     /// Will return `Err` if an IO error occurs.
     pub fn is_empty(&self) -> crate::Result<bool> {
         self.first_key_value().map(|x| x.is_none())
-    }
+    } */
 
     #[doc(hidden)]
     pub fn get_internal_entry<K: AsRef<[u8]>>(
@@ -551,11 +565,11 @@ impl Tree {
         self.get(key).map(|x| x.is_some())
     }
 
-    pub(crate) fn create_iter(&self, seqno: Option<SeqNo>) -> Range {
+    /* pub(crate) fn create_iter(&self, seqno: Option<SeqNo>) -> Range {
         self.create_range::<UserKey, _>(.., seqno)
-    }
+    } */
 
-    /// Returns an iterator that scans through the entire tree.
+    /* /// Returns an iterator that scans through the entire tree.
     ///
     /// Avoid using this function, or limit it as otherwise it may scan a lot of items.
     ///
@@ -582,12 +596,13 @@ impl Tree {
     #[must_use]
     pub fn iter(&self) -> Range {
         self.create_iter(None)
-    }
+    } */
 
     pub(crate) fn create_range<K: AsRef<[u8]>, R: RangeBounds<K>>(
         &self,
         range: R,
         seqno: Option<SeqNo>,
+        mapper: Box<dyn Mapper>,
     ) -> Range {
         use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
@@ -624,37 +639,11 @@ impl Tree {
             bounds,
             segment_info,
             seqno,
+            mapper,
         )
     }
 
-    /// Returns an iterator over a range of items.
-    ///
-    /// Avoid using full or unbounded ranges as they may scan a lot of items (unless limited).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # let folder = tempfile::tempdir()?;
-    /// use lsm_tree::{AbstractTree, Config, Tree};
-    ///
-    /// let tree = Config::new(folder).open()?;
-    ///
-    /// tree.insert("a", "abc", 0);
-    /// tree.insert("f", "abc", 1);
-    /// tree.insert("g", "abc", 2);
-    /// assert_eq!(2, tree.range("a"..="f").into_iter().count());
-    /// #
-    /// # Ok::<(), lsm_tree::Error>(())
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Will return `Err` if an IO error occurs.
-    pub fn range<K: AsRef<[u8]>, R: RangeBounds<K>>(&self, range: R) -> Range {
-        self.create_range(range, None)
-    }
-
-    pub(crate) fn create_prefix<K: Into<UserKey>>(
+    /*   pub(crate) fn create_prefix<K: Into<UserKey>>(
         &self,
         prefix: K,
         seqno: Option<SeqNo>,
@@ -681,9 +670,9 @@ impl Tree {
             segment_info,
             seqno,
         )
-    }
+    } */
 
-    /// Returns an iterator over a prefixed set of items.
+    /*  /// Returns an iterator over a prefixed set of items.
     ///
     /// Avoid using an empty prefix as it may scan a lot of items (unless limited).
     ///
@@ -708,9 +697,9 @@ impl Tree {
     /// Will return `Err` if an IO error occurs.
     pub fn prefix<K: AsRef<[u8]>>(&self, prefix: K) -> Prefix {
         self.create_prefix(prefix.as_ref(), None)
-    }
+    } */
 
-    /// Returns the first key-value pair in the tree.
+    /*  /// Returns the first key-value pair in the tree.
     /// The key in this pair is the minimum key in the tree.
     ///
     /// # Examples
@@ -742,9 +731,9 @@ impl Tree {
         // TODO: same for last_kv
 
         self.iter().into_iter().next().transpose()
-    }
+    } */
 
-    /// Returns the last key-value pair in the tree.
+    /*  /// Returns the last key-value pair in the tree.
     /// The key in this pair is the maximum key in the tree.
     ///
     /// # Examples
@@ -771,7 +760,7 @@ impl Tree {
     /// Will return `Err` if an IO error occurs.
     pub fn last_key_value(&self) -> crate::Result<Option<(UserKey, UserValue)>> {
         self.iter().into_iter().next_back().transpose()
-    }
+    } */
 
     /// Adds an item to the active memtable.
     ///
@@ -819,7 +808,7 @@ impl Tree {
             active_memtable: Arc::default(),
             sealed_memtables: Arc::default(),
             levels: Arc::new(RwLock::new(levels)),
-            open_snapshots: SnapshotCounter::default(),
+            /* open_snapshots: SnapshotCounter::default(), */
             stop_signal: StopSignal::default(),
             config,
             block_cache,

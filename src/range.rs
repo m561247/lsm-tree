@@ -1,8 +1,9 @@
 use crate::{
     memtable::MemTable,
     merge::{BoxedIterator, MergeIterator},
+    r#abstract::RangeItem,
     segment::Segment,
-    value::{ParsedInternalKey, SeqNo, UserKey, UserValue, ValueType},
+    value::{ParsedInternalKey, SeqNo, UserKey, ValueType},
     Value,
 };
 use guardian::ArcRwLockReadGuardian;
@@ -18,6 +19,7 @@ pub struct Range {
     bounds: (Bound<UserKey>, Bound<UserKey>),
     segments: Vec<Arc<Segment>>,
     seqno: Option<SeqNo>,
+    mapper: Box<dyn Mapper>,
 }
 
 impl Range {
@@ -27,12 +29,14 @@ impl Range {
         bounds: (Bound<UserKey>, Bound<UserKey>),
         segments: Vec<Arc<Segment>>,
         seqno: Option<SeqNo>,
+        mapper: Box<dyn Mapper>,
     ) -> Self {
         Self {
             guard,
             bounds,
             segments,
             seqno,
+            mapper,
         }
     }
 }
@@ -40,10 +44,16 @@ impl Range {
 #[allow(clippy::module_name_repetitions)]
 pub struct RangeIterator<'a> {
     iter: BoxedIterator<'a>,
+    seqno: Option<SeqNo>,
+    mapper: &'a Box<dyn Mapper>,
+}
+
+pub trait Mapper {
+    fn map(&self, item: RangeItem, seqno: Option<SeqNo>) -> Option<RangeItem>;
 }
 
 impl<'a> RangeIterator<'a> {
-    fn new(lock: &'a Range, seqno: Option<SeqNo>) -> Self {
+    fn new(lock: &'a Range, seqno: Option<SeqNo>, mapper: &'a Box<dyn Mapper>) -> Self {
         let lo = match &lock.bounds.0 {
             // NOTE: See memtable.rs for range explanation
             Bound::Included(key) => Bound::Included(ParsedInternalKey::new(
@@ -98,7 +108,7 @@ impl<'a> RangeIterator<'a> {
 
         let mut iters: Vec<BoxedIterator<'a>> = vec![Box::new(MergeIterator::new(segment_iters))];
 
-        for (_, memtable) in lock.guard.sealed.iter() {
+        for memtable in lock.guard.sealed.values() {
             iters.push(Box::new(memtable.items.range(range.clone()).map(|entry| {
                 Ok(Value::from((entry.key().clone(), entry.value().clone())))
             })));
@@ -125,29 +135,35 @@ impl<'a> RangeIterator<'a> {
             Err(_) => true,
         }));
 
-        Self { iter }
+        Self {
+            iter,
+            seqno,
+            mapper,
+        }
     }
 }
 
 impl<'a> Iterator for RangeIterator<'a> {
-    type Item = crate::Result<(UserKey, UserValue)>;
+    type Item = RangeItem;
 
     fn next(&mut self) -> Option<Self::Item> {
-        Some(self.iter.next()?.map(|x| (x.key, x.value)))
+        let item = self.iter.next()?.map(|x| (x.key, x.value));
+        self.mapper.map(item, self.seqno)
     }
 }
 
 impl<'a> DoubleEndedIterator for RangeIterator<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        Some(self.iter.next_back()?.map(|x| (x.key, x.value)))
+        let item = self.iter.next_back()?.map(|x| (x.key, x.value));
+        self.mapper.map(item, self.seqno)
     }
 }
 
 impl<'a> IntoIterator for &'a Range {
     type IntoIter = RangeIterator<'a>;
-    type Item = <Self::IntoIter as Iterator>::Item;
+    type Item = RangeItem;
 
     fn into_iter(self) -> Self::IntoIter {
-        RangeIterator::new(self, self.seqno)
+        RangeIterator::new(self, self.seqno, &self.mapper)
     }
 }

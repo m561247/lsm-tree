@@ -8,7 +8,7 @@ use crate::{
     memtable::MemTable,
     merge::MergeIterator,
     segment::{block_index::BlockIndex, multi_writer::MultiWriter, Segment},
-    snapshot::SnapshotCounter, /* Tree, */
+    /* snapshot::SnapshotCounter, /* Tree, */ */
     stop_signal::StopSignal,
     BlockCache,
 };
@@ -41,9 +41,8 @@ pub struct Options {
     /// sealed memtables (required for temporarily locking).
     pub sealed_memtables: Arc<RwLock<BTreeMap<Arc<str>, Arc<MemTable>>>>,
 
-    /// Snapshot counter (required for checking if there are open snapshots).
-    pub open_snapshots: SnapshotCounter,
-
+    /*    /// Snapshot counter (required for checking if there are open snapshots).
+    pub open_snapshots: SnapshotCounter, */
     /// Compaction strategy.
     ///
     /// The one inside `config` is NOT used.
@@ -116,7 +115,7 @@ fn merge_segments(
         // otherwise snapshots will lose data
         //
         // Also, keep versions around for a bit (don't evict when compacting into L0 & L1)
-        let no_snapshots_open = !opts.open_snapshots.has_open_snapshots();
+        let no_snapshots_open =/*  !opts.open_snapshots.has_open_snapshots() */ false; // TODO:
         let is_deep_level = payload.dest_level >= 2;
 
         MergeIterator::from_segments(&to_merge)

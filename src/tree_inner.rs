@@ -4,7 +4,7 @@ use crate::{
     file::LEVELS_MANIFEST_FILE,
     levels::Levels,
     memtable::MemTable,
-    snapshot::SnapshotCounter,
+    /* snapshot::SnapshotCounter, */
     stop_signal::StopSignal,
     BlockCache,
 };
@@ -34,9 +34,8 @@ pub struct TreeInner {
     /// File descriptor cache table
     pub descriptor_table: Arc<FileDescriptorTable>,
 
-    /// Keeps track of open snapshots
-    pub(crate) open_snapshots: SnapshotCounter,
-
+    /*     /// Keeps track of open snapshots
+    pub(crate) open_snapshots: SnapshotCounter, */
     /// Compaction may take a while; setting the signal to `true`
     /// will interrupt the compaction and kill the worker.
     pub(crate) stop_signal: StopSignal,
@@ -56,7 +55,7 @@ impl TreeInner {
             active_memtable: Arc::default(),
             sealed_memtables: Arc::default(),
             levels: Arc::new(RwLock::new(levels)),
-            open_snapshots: SnapshotCounter::default(),
+            /*           open_snapshots: SnapshotCounter::default(), */
             stop_signal: StopSignal::default(),
         })
     }

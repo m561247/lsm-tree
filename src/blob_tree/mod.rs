@@ -1,9 +1,14 @@
 pub mod index;
 mod value;
 
-use crate::{r#abstract::AbstractTree, serde::Serializable, SeqNo};
+use crate::{
+    r#abstract::AbstractTree,
+    range::{Mapper, Range},
+    serde::{Deserializable, Serializable},
+    SeqNo,
+};
 use index::IndexTree;
-use std::{path::Path, sync::Arc};
+use std::{io::Cursor, ops::RangeBounds, path::Path, sync::Arc};
 use value::MaybeInlineValue;
 use value_log::ValueLog;
 
@@ -34,7 +39,43 @@ impl BlobTree {
     }
 }
 
+struct VlogMapper {
+    blobs: ValueLog,
+}
+
+impl Mapper for VlogMapper {
+    fn map(
+        &self,
+        item: crate::r#abstract::RangeItem,
+        _seqno: Option<SeqNo>,
+    ) -> Option<crate::r#abstract::RangeItem> {
+        match item {
+            Ok((key, value)) => {
+                let mut cursor = Cursor::new(value);
+                let item = MaybeInlineValue::deserialize(&mut cursor).expect("should deserialize");
+
+                match item {
+                    MaybeInlineValue::Inline(bytes) => Some(Ok((key, bytes))),
+                    MaybeInlineValue::Indirect(handle) => match self.blobs.get(&handle) {
+                        Ok(Some(bytes)) => Some(Ok((key, bytes))),
+                        Ok(None) => None,
+                        Err(e) => Some(Err(e.into())),
+                    },
+                }
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
 impl AbstractTree for BlobTree {
+    fn range<K: AsRef<[u8]>, R: RangeBounds<K>>(&self, range: R) -> Range {
+        let mapper = VlogMapper {
+            blobs: self.blobs.clone(),
+        };
+        self.index.0.create_range(range, None, Box::new(mapper))
+    }
+
     fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V, seqno: SeqNo) -> (u32, u32) {
         // NOTE: Initially, we always write an inline value
         // On memtable flush, depending on the values' sizes, they will be separated

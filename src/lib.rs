@@ -138,8 +138,8 @@ mod lru_list;
 mod memtable;
 mod merge;
 
-#[doc(hidden)]
-pub mod prefix;
+/* #[doc(hidden)]
+pub mod prefix; */
 
 #[doc(hidden)]
 pub mod range;
@@ -152,7 +152,7 @@ mod seqno;
 #[doc(hidden)]
 pub mod serde;
 
-mod snapshot;
+/* mod snapshot; */
 
 #[doc(hidden)]
 pub mod stop_signal;
@@ -175,7 +175,7 @@ pub use {
     segment::Segment,
     seqno::SequenceNumberCounter,
     serde::{DeserializeError, SerializeError},
-    snapshot::Snapshot,
+    /*  snapshot::Snapshot, */
     tree::Tree,
     value::{SeqNo, UserKey, UserValue, Value, ValueType},
 };
