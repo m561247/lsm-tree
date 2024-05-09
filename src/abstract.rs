@@ -48,6 +48,90 @@ pub trait AbstractTree {
         Ok(count)
     }
 
+    /// Returns `true` if the tree is empty.
+    ///
+    /// This operation has O(1) complexity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # let folder = tempfile::tempdir()?;
+    /// use lsm_tree::{AbstractTree, Config, Tree};
+    ///
+    /// let tree = Config::new(folder).open()?;
+    /// assert!(tree.is_empty()?);
+    ///
+    /// tree.insert("a", "abc", 0);
+    /// assert!(!tree.is_empty()?);
+    /// #
+    /// # Ok::<(), lsm_tree::Error>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if an IO error occurs.
+    fn is_empty(&self) -> crate::Result<bool> {
+        self.first_key_value().map(|x| x.is_none())
+    }
+
+    /// Returns the first key-value pair in the tree.
+    /// The key in this pair is the minimum key in the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lsm_tree::Error as TreeError;
+    /// # use lsm_tree::{AbstractTree, Config, Tree};
+    /// #
+    /// # let folder = tempfile::tempdir()?;
+    /// let tree = Config::new(folder).open()?;
+    ///
+    /// tree.insert("1", "abc", 0);
+    /// tree.insert("3", "abc", 1);
+    /// tree.insert("5", "abc", 2);
+    ///
+    /// let (key, _) = tree.first_key_value()?.expect("item should exist");
+    /// assert_eq!(&*key, "1".as_bytes());
+    /// #
+    /// # Ok::<(), TreeError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if an IO error occurs.
+    fn first_key_value(&self) -> crate::Result<Option<(UserKey, UserValue)>> {
+        self.iter().into_iter().next().transpose()
+    }
+
+    /// Returns the last key-value pair in the tree.
+    /// The key in this pair is the maximum key in the tree.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use lsm_tree::Error as TreeError;
+    /// # use lsm_tree::{AbstractTree, Config, Tree};
+    /// #
+    /// # let folder = tempfile::tempdir()?;
+    /// # let tree = Config::new(folder).open()?;
+    /// #
+    /// tree.insert("1", "abc", 0);
+    /// tree.insert("3", "abc", 1);
+    /// tree.insert("5", "abc", 2);
+    ///
+    /// let (key, _) = tree.last_key_value()?.expect("item should exist");
+    /// assert_eq!(&*key, "5".as_bytes());
+    /// #
+    /// # Ok::<(), TreeError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if an IO error occurs.
+    fn last_key_value(&self) -> crate::Result<Option<(UserKey, UserValue)>> {
+        self.iter().into_iter().next_back().transpose()
+    }
+
     /// Returns an iterator that scans through the entire tree.
     ///
     /// Avoid using this function, or limit it as otherwise it may scan a lot of items.
