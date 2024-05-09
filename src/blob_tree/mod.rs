@@ -1,9 +1,10 @@
 pub mod index;
+mod value;
 
-use self::index::MaybeInlineValue;
 use crate::{r#abstract::AbstractTree, serde::Serializable, SeqNo};
 use index::IndexTree;
 use std::{path::Path, sync::Arc};
+use value::MaybeInlineValue;
 use value_log::ValueLog;
 
 /// A key-value separated log-structured merge tree
@@ -47,7 +48,7 @@ impl AbstractTree for BlobTree {
     }
 
     fn get<K: AsRef<[u8]>>(&self, key: K) -> crate::Result<Option<Arc<[u8]>>> {
-        use index::MaybeInlineValue::{Indirect, Inline};
+        use MaybeInlineValue::{Indirect, Inline};
 
         let Some(value) = self.index.get_internal(key.as_ref())? else {
             return Ok(None);

@@ -97,6 +97,7 @@ compile_error!("compilation is only allowed for 64-bit targets");
 
 mod r#abstract;
 
+#[cfg(feature = "kv-sep")]
 #[doc(hidden)]
 pub mod blob_tree;
 
@@ -162,8 +163,10 @@ mod tree_inner;
 mod value;
 mod version;
 
+#[cfg(feature = "kv-sep")]
+pub use blob_tree::BlobTree;
+
 pub use {
-    blob_tree::BlobTree,
     block_cache::BlockCache,
     config::Config,
     error::{Error, Result},
