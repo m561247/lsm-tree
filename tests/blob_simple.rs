@@ -3,7 +3,6 @@ use std::path::Path;
 use test_log::test;
 
 #[test]
-#[ignore]
 fn blob_simple() -> lsm_tree::Result<()> {
     /* let folder = tempfile::tempdir()?;
     let path = folder.path(); */

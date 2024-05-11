@@ -1,20 +1,20 @@
 use super::value::MaybeInlineValue;
-use crate::{serde::Deserializable, Tree as LsmTree};
+use crate::{serde::Deserializable, AbstractTree, Tree as LsmTree};
 use std::io::Cursor;
 use value_log::ValueHandle;
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
-pub struct IndexTree(pub(crate) LsmTree);
+pub struct IndexTree(#[doc(hidden)] pub LsmTree);
 
 impl IndexTree {
     pub fn get_internal(&self, key: &[u8]) -> crate::Result<Option<MaybeInlineValue>> {
-        let Some(item) = self.0.get(key).expect("oh no") else {
+        let Some(item) = self.0.get(key)? else {
             return Ok(None);
         };
 
         let mut cursor = Cursor::new(item);
-        let item = MaybeInlineValue::deserialize(&mut cursor).expect("should deserialize");
+        let item = MaybeInlineValue::deserialize(&mut cursor)?;
 
         Ok(Some(item))
     }

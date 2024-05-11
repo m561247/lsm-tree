@@ -52,7 +52,7 @@ impl Range {
 pub struct RangeIterator<'a> {
     iter: BoxedIterator<'a>,
     seqno: Option<SeqNo>,
-    mapper: &'a Box<dyn Mapper>,
+    mapper: &'a Box<dyn Mapper>, // TODO: no box pls
 }
 
 pub trait Mapper {

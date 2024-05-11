@@ -69,9 +69,7 @@ impl Deserializable for MaybeInlineValue {
                 let handle = ValueHandle::deserialize(reader)?;
                 Ok(Self::Indirect(handle))
             }
-            _ => {
-                panic!("Invalid tag");
-            }
+            x => Err(DeserializeError::InvalidTag(x)),
         }
     }
 }

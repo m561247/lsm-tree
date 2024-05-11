@@ -81,6 +81,12 @@
 //! #
 //! # Ok::<(), lsm_tree::Error>(())
 //! ```
+//!
+//! # Key-value separation
+//!
+//! This crate also exports a `BlobTree`, which supports the same API as `Tree`, but
+//! will automatically separate large values into a log-structured value log, inspired
+//! by `RocksDB`'s `BlobDB`.
 
 #![doc(html_logo_url = "https://raw.githubusercontent.com/fjall-rs/lsm-tree/main/logo.png")]
 #![doc(html_favicon_url = "https://raw.githubusercontent.com/fjall-rs/lsm-tree/main/logo.png")]

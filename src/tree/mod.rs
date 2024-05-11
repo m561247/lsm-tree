@@ -28,7 +28,7 @@ fn ignore_tombstone_value(item: Value) -> Option<Value> {
     }
 }
 
-/// A log-structured merge tree
+/// A log-structured merge tree.
 #[derive(Clone)]
 pub struct Tree(pub(crate) Arc<TreeInner>);
 
@@ -204,14 +204,14 @@ impl Tree {
             flush::{flush_to_segment, Options},
         };
 
-        log::debug!("flush: flushing active memtable");
+        log::debug!("flushing active memtable");
 
         let Some((segment_id, yanked_memtable)) = self.rotate_memtable() else {
             return Ok(None);
         };
 
         let segment_folder = self.path.join(SEGMENTS_FOLDER);
-        log::debug!("flush: writing segment to {segment_folder:?}");
+        log::debug!("writing segment to {segment_folder:?}");
 
         let segment = flush_to_segment(Options {
             memtable: yanked_memtable,
@@ -228,7 +228,7 @@ impl Tree {
         // and remove it from the sealed memtables
         self.register_segments(&[segment])?;
 
-        log::debug!("flush: thread done");
+        log::debug!("thread done");
         Ok(Some(segment_folder))
     }
 

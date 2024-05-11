@@ -47,6 +47,8 @@ pub struct Options {
     pub descriptor_table: Arc<FileDescriptorTable>,
 }
 
+// TODO: can be moved into Tree...? is holding reference to tree fine?
+
 /// Flushes a memtable, creating a segment in the given folder
 #[allow(clippy::module_name_repetitions)]
 #[doc(hidden)]
