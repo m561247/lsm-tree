@@ -177,7 +177,7 @@ impl Tree {
         let mut memtable_lock = self.sealed_memtables.write().expect("lock is poisoned");
 
         for segment in segments {
-            memtable_lock.remove(&segment.metadata.id);
+            memtable_lock.remove(segment.metadata.id);
         }
 
         // NOTE: Segments are registered, we can unlock the memtable(s) safely
@@ -308,7 +308,7 @@ impl Tree {
         let yanked_memtable = Arc::new(yanked_memtable);
 
         let tmp_memtable_id = self.get_next_segment_id();
-        sealed_memtables.insert(tmp_memtable_id, yanked_memtable.clone());
+        sealed_memtables.add(tmp_memtable_id, yanked_memtable.clone());
 
         Some((tmp_memtable_id, yanked_memtable))
     }
@@ -327,7 +327,7 @@ impl Tree {
     /// May be used to restore the LSM-tree's in-memory state from some journals.
     pub fn add_sealed_memtable(&self, id: MemtableId, memtable: Arc<MemTable>) {
         let mut memtable_lock = self.sealed_memtables.write().expect("lock is poisoned");
-        memtable_lock.insert(id, memtable);
+        memtable_lock.add(id, memtable);
     }
 
     #[doc(hidden)]
@@ -360,14 +360,30 @@ impl Tree {
         drop(memtable_lock);
 
         // Now look in segments... this may involve disk I/O
-        let levels = self.levels.read().expect("lock is poisoned");
+        let level_manifest = self.levels.read().expect("lock is poisoned");
 
-        for segment in levels.iter() {
-            if let Some(item) = segment.get(&key, seqno)? {
-                if evict_tombstone {
-                    return Ok(ignore_tombstone_value(item));
+        for level in &level_manifest.levels {
+            // NOTE: Based on benchmarking, binary search is only worth it after ~5 segments
+            if level.is_disjoint && level.len() > 5 {
+                let Some(segment) = level.get_segment_containing_key(&key) else {
+                    return Ok(None);
+                };
+
+                if let Some(item) = segment.get(&key, seqno)? {
+                    if evict_tombstone {
+                        return Ok(ignore_tombstone_value(item));
+                    }
+                    return Ok(Some(item));
                 }
-                return Ok(Some(item));
+            } else {
+                for segment in &level.segments {
+                    if let Some(item) = segment.get(&key, seqno)? {
+                        if evict_tombstone {
+                            return Ok(ignore_tombstone_value(item));
+                        }
+                        return Ok(Some(item));
+                    }
+                }
             }
         }
 
