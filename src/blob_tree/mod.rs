@@ -113,7 +113,9 @@ impl BlobTree {
             let size = value.len();
 
             // TODO: blob threshold
-            let value_wrapper = if size >= 4_096 {
+            let value_wrapper = if size < 4_096 {
+                MaybeInlineValue::Inline(value)
+            } else {
                 let offset = blob_writer.offset(&key.user_key);
                 blob_writer.write(&key.user_key, &value)?;
 
@@ -122,8 +124,6 @@ impl BlobTree {
                     segment_id: blob_id,
                 };
                 MaybeInlineValue::Indirect(value_handle)
-            } else {
-                MaybeInlineValue::Inline(value)
             };
 
             let mut serialized = vec![];
