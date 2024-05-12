@@ -113,38 +113,25 @@ impl BlobTree {
             let size = value.len();
 
             // TODO: blob threshold
-            if size >= 4_096 {
+            let value_wrapper = if size >= 4_096 {
                 let offset = blob_writer.offset(&key.user_key);
+                blob_writer.write(&key.user_key, &value)?;
+
                 let value_handle = ValueHandle {
                     offset,
                     segment_id: blob_id,
                 };
-
-                let indirection = MaybeInlineValue::Indirect(value_handle);
-                let mut serialized_indirection = vec![];
-                indirection
-                    .serialize(&mut serialized_indirection)
-                    .expect("should serialize");
-
-                blob_writer.write(&key.user_key, &value)?;
-                segment_writer.write(crate::Value::new(
-                    key.user_key.clone(),
-                    serialized_indirection,
-                    key.seqno,
-                    crate::ValueType::Value,
-                ))?;
+                MaybeInlineValue::Indirect(value_handle)
             } else {
-                let inlined = MaybeInlineValue::Inline(value);
-                let mut serialized_inlined = vec![];
-                inlined
-                    .serialize(&mut serialized_inlined)
-                    .expect("should serialize");
+                MaybeInlineValue::Inline(value)
+            };
 
-                segment_writer.write(crate::Value::from((
-                    (key.clone()),
-                    serialized_inlined.into(),
-                )))?;
-            }
+            let mut serialized = vec![];
+            value_wrapper
+                .serialize(&mut serialized)
+                .expect("should serialize");
+
+            segment_writer.write(crate::Value::from(((key.clone()), serialized.into())))?;
         }
 
         self.blobs.register(blob_writer)?;
