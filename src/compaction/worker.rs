@@ -9,7 +9,7 @@ use crate::{
     segment::{block_index::BlockIndex, id::GlobalSegmentId, multi_writer::MultiWriter, Segment},
     /* snapshot::SnapshotCounter, /* Tree, */ */
     stop_signal::StopSignal,
-    tree_inner::{SealedMemtables, TreeId},
+    tree::inner::{SealedMemtables, TreeId},
     BlockCache,
 };
 use std::{

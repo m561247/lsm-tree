@@ -130,8 +130,8 @@ mod error;
 #[doc(hidden)]
 pub mod file;
 
-#[doc(hidden)]
-pub mod flush;
+/* #[doc(hidden)]
+pub mod flush; */
 
 mod key_range;
 
@@ -166,7 +166,6 @@ pub mod stop_signal;
 
 mod time;
 mod tree;
-mod tree_inner;
 mod value;
 mod version;
 
@@ -176,7 +175,7 @@ pub use blob_tree::BlobTree;
 #[doc(hidden)]
 pub use {
     segment::{id::GlobalSegmentId, meta::SegmentId},
-    tree_inner::TreeId,
+    tree::inner::TreeId,
 };
 
 pub use {

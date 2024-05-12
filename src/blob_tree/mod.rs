@@ -70,13 +70,8 @@ impl BlobTree {
 
     pub fn flush_active_memtable(&self) -> crate::Result<Option<()>> {
         use crate::{
-            file::{BLOCKS_FILE, SEGMENTS_FOLDER},
-            segment::{
-                block_index::BlockIndex,
-                meta::Metadata,
-                writer::{Options, Writer as SegmentWriter},
-                Segment,
-            },
+            file::SEGMENTS_FOLDER,
+            segment::writer::{Options, Writer as SegmentWriter},
         };
         use value::MaybeInlineValue;
 
@@ -96,7 +91,10 @@ impl BlobTree {
         let mut segment_writer = SegmentWriter::new(Options {
             block_size: self.index.0.config.block_size,
             evict_tombstones: false,
-            folder: lsm_segment_folder.clone(),
+            folder: lsm_segment_folder,
+
+            #[cfg(feature = "bloom")]
+            bloom_fp_rate: 0.0001,
         })?;
         let mut blob_writer = self.blobs.get_writer()?;
 
@@ -140,42 +138,7 @@ impl BlobTree {
 
         self.blobs.register(blob_writer)?;
         segment_writer.finish()?;
-
-        let metadata = Metadata::from_writer(segment_id, segment_writer)?;
-        metadata.write_to_file(&lsm_segment_folder)?;
-
-        log::debug!("Finalized segment write at {lsm_segment_folder:?}");
-
-        let tree_id = self.index.0.id;
-        let descriptor_table = &self.index.0.descriptor_table;
-        let block_cache = &self.index.0.block_cache;
-
-        // TODO: if L0, L1, preload block index (non-partitioned)
-        let block_index = Arc::new(BlockIndex::from_file(
-            (tree_id, segment_id).into(),
-            descriptor_table.clone(),
-            &lsm_segment_folder,
-            block_cache.clone(),
-        )?);
-
-        let created_segment = Segment {
-            tree_id,
-
-            descriptor_table: descriptor_table.clone(),
-            metadata,
-            block_index,
-            block_cache: block_cache.clone(),
-
-            #[cfg(feature = "bloom")]
-            bloom_filter: BloomFilter::from_file(lsm_segment_folder.join(BLOOM_FILTER_FILE))?,
-        };
-
-        descriptor_table.insert(
-            lsm_segment_folder.join(BLOCKS_FILE),
-            (tree_id, created_segment.metadata.id).into(),
-        );
-
-        log::debug!("Flushed segment to {lsm_segment_folder:?}");
+        self.index.0.consume_writer(segment_id, segment_writer)?;
 
         Ok(None)
     }

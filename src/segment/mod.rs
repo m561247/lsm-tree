@@ -18,7 +18,7 @@ use crate::{
     block_cache::BlockCache,
     descriptor_table::FileDescriptorTable,
     file::SEGMENT_METADATA_FILE,
-    tree_inner::TreeId,
+    tree::inner::TreeId,
     value::{SeqNo, UserKey},
     Value,
 };

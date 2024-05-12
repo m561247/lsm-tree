@@ -4,7 +4,7 @@ use crate::{
     merge::{BoxedIterator, MergeIterator},
     r#abstract::RangeItem,
     segment::multi_reader::MultiReader,
-    tree_inner::SealedMemtables,
+    tree::inner::SealedMemtables,
     value::{ParsedInternalKey, SeqNo, UserKey, ValueType},
     Value,
 };

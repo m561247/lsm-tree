@@ -8,7 +8,7 @@ use crate::{
         writer::Writer,
         Segment,
     },
-    tree_inner::TreeId,
+    tree::inner::TreeId,
     BlockCache,
 };
 use std::{path::PathBuf, sync::Arc};
