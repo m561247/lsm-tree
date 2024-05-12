@@ -11,6 +11,9 @@ pub const INDEX_BLOCKS_FILE: &str = "index_blocks";
 pub const TOP_LEVEL_INDEX_FILE: &str = "index";
 pub const SEGMENT_METADATA_FILE: &str = "meta";
 
+#[cfg(feature = "kv-sep")]
+pub const BLOBS_FOLDER: &str = "blobs";
+
 #[cfg(feature = "bloom")]
 pub const BLOOM_FILTER_FILE: &str = "bloom";
 

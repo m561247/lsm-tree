@@ -2,6 +2,7 @@ pub mod index;
 mod value;
 
 use crate::{
+    file::BLOBS_FOLDER,
     r#abstract::AbstractTree,
     range::{Mapper, Range},
     serde::{Deserializable, Serializable},
@@ -58,7 +59,7 @@ pub struct BlobTree {
 impl BlobTree {
     pub fn open(config: Config) -> crate::Result<Self> {
         let path = &config.path;
-        let vlog_path = path.join("blobs");
+        let vlog_path = path.join(BLOBS_FOLDER);
 
         let index: IndexTree = config.open()?.into();
 
