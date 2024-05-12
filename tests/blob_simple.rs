@@ -1,13 +1,10 @@
 use lsm_tree::AbstractTree;
-use std::path::Path;
 use test_log::test;
 
 #[test]
-fn blob_simple() -> lsm_tree::Result<()> {
-    /* let folder = tempfile::tempdir()?;
-    let path = folder.path(); */
-
-    let path = Path::new(".blobby");
+fn blob_tree_simple() -> lsm_tree::Result<()> {
+    let folder = tempfile::tempdir()?;
+    let path = folder.path();
 
     if path.try_exists()? {
         std::fs::remove_dir_all(&path)?;
@@ -15,7 +12,7 @@ fn blob_simple() -> lsm_tree::Result<()> {
 
     std::fs::create_dir_all(&path)?;
 
-    let tree = lsm_tree::BlobTree::open(path)?;
+    let tree = lsm_tree::Config::new(path).open_as_blob_tree()?;
 
     let big_value = b"neptune!".repeat(128_000);
 

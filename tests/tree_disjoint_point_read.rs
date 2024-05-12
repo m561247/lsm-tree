@@ -1,3 +1,4 @@
+use lsm_tree::AbstractTree;
 use lsm_tree::Config;
 use std::sync::Arc;
 use test_log::test;
@@ -70,8 +71,6 @@ fn tree_disjoint_point_read_multiple_levels() -> lsm_tree::Result<()> {
     tree.flush_active_memtable()?;
     tree.insert("j", "j", 0);
     tree.flush_active_memtable()?;
-
-    log::error!("{:#?}", tree.levels.read().expect("asdasd").levels);
 
     for key in [b"z", b"b", b"c", b"d", b"e", b"f"] {
         let value = tree.get(key).unwrap().unwrap();

@@ -5,10 +5,10 @@ use crate::{
     r#abstract::AbstractTree,
     range::{Mapper, Range},
     serde::{Deserializable, Serializable},
-    SeqNo,
+    Config, SeqNo,
 };
 use index::IndexTree;
-use std::{io::Cursor, ops::RangeBounds, path::Path, sync::Arc};
+use std::{io::Cursor, ops::RangeBounds, sync::Arc};
 use value_log::{ValueHandle, ValueLog};
 
 /// A key-value separated log-structured merge tree
@@ -17,7 +17,9 @@ use value_log::{ValueHandle, ValueLog};
 /// to reduce write amplification.
 /// See <https://docs.rs/value-log> for more information.
 pub struct BlobTree {
-    index: IndexTree,
+    #[doc(hidden)]
+    pub index: IndexTree,
+
     blobs: ValueLog<IndexTree>,
 }
 
@@ -54,17 +56,15 @@ pub struct BlobTree {
 } */
 
 impl BlobTree {
-    pub fn open<P: AsRef<Path>>(path: P) -> crate::Result<Self> {
-        let path = path.as_ref();
+    pub fn open(config: Config) -> crate::Result<Self> {
+        let path = &config.path;
         let vlog_path = path.join("blobs");
 
-        let vlog_cfg = value_log::Config::default();
-
-        let index: IndexTree = crate::Config::new(path).open()?.into();
+        let index: IndexTree = config.open()?.into();
 
         Ok(Self {
             index: index.clone(),
-            blobs: ValueLog::open(vlog_path, vlog_cfg, index)?,
+            blobs: ValueLog::open(vlog_path, value_log::Config::default(), index)?,
         })
     }
 
@@ -112,6 +112,7 @@ impl BlobTree {
 
             let size = value.len();
 
+            // TODO: blob threshold
             if size >= 4_096 {
                 let offset = blob_writer.offset(&key.user_key);
                 let value_handle = ValueHandle {
@@ -119,20 +120,30 @@ impl BlobTree {
                     segment_id: blob_id,
                 };
 
-                let mut serialized_handle = vec![];
-                value_handle
-                    .serialize(&mut serialized_handle)
+                let indirection = MaybeInlineValue::Indirect(value_handle);
+                let mut serialized_indirection = vec![];
+                indirection
+                    .serialize(&mut serialized_indirection)
                     .expect("should serialize");
 
                 blob_writer.write(&key.user_key, &value)?;
                 segment_writer.write(crate::Value::new(
                     key.user_key.clone(),
-                    serialized_handle,
+                    serialized_indirection,
                     key.seqno,
                     crate::ValueType::Value,
                 ))?;
             } else {
-                segment_writer.write(crate::Value::from(((key.clone()), value.clone())))?;
+                let inlined = MaybeInlineValue::Inline(value);
+                let mut serialized_inlined = vec![];
+                inlined
+                    .serialize(&mut serialized_inlined)
+                    .expect("should serialize");
+
+                segment_writer.write(crate::Value::from((
+                    (key.clone()),
+                    serialized_inlined.into(),
+                )))?;
             }
         }
 

@@ -69,7 +69,7 @@ impl AbstractTree for Tree {
     }
 
     fn remove<K: AsRef<[u8]>>(&self, key: K, seqno: SeqNo) -> (u32, u32) {
-        let value = Value::new(key.as_ref(), vec![], seqno, ValueType::Tombstone);
+        let value = Value::new_tombstone(key.as_ref(), seqno);
         self.append_entry(value)
     }
 }
@@ -194,7 +194,7 @@ impl Tree {
         &self,
         segment_id: SegmentId,
         writer: crate::segment::writer::Writer,
-    ) -> crate::Result<Segment> {
+    ) -> crate::Result<Arc<Segment>> {
         use crate::{file::BLOCKS_FILE, segment::meta::Metadata};
 
         #[cfg(feature = "bloom")]
@@ -217,7 +217,7 @@ impl Tree {
             self.block_cache.clone(),
         )?);
 
-        let created_segment = Segment {
+        let created_segment: Arc<_> = Segment {
             tree_id: self.id,
 
             descriptor_table: self.descriptor_table.clone(),
@@ -227,7 +227,8 @@ impl Tree {
 
             #[cfg(feature = "bloom")]
             bloom_filter: BloomFilter::from_file(segment_folder.join(BLOOM_FILTER_FILE))?,
-        };
+        }
+        .into();
 
         self.descriptor_table.insert(
             segment_folder.join(BLOCKS_FILE),
@@ -235,6 +236,8 @@ impl Tree {
         );
 
         log::debug!("Flushed segment to {segment_folder:?}");
+
+        self.register_segments(&[created_segment.clone()])?;
 
         Ok(created_segment)
     }
@@ -249,7 +252,7 @@ impl Tree {
     /// # Errors
     ///
     /// Will return `Err` if an IO error occurs.
-    pub fn flush_active_memtable(&self) -> crate::Result<Option<Segment>> {
+    pub fn flush_active_memtable(&self) -> crate::Result<Option<Arc<Segment>>> {
         log::debug!("flushing active memtable");
 
         let Some((segment_id, yanked_memtable)) = self.rotate_memtable() else {
@@ -270,7 +273,7 @@ impl Tree {
         &self,
         segment_id: SegmentId,
         memtable: &Arc<MemTable>,
-    ) -> crate::Result<Segment> {
+    ) -> crate::Result<Arc<Segment>> {
         use crate::{
             file::SEGMENTS_FOLDER,
             segment::writer::{Options, Writer},

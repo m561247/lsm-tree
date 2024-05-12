@@ -2,7 +2,7 @@ use crate::{
     descriptor_table::FileDescriptorTable,
     segment::meta::{CompressionType, TableType},
     serde::{Deserializable, Serializable},
-    BlockCache, DeserializeError, SerializeError, Tree,
+    BlobTree, BlockCache, DeserializeError, SerializeError, Tree,
 };
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use path_absolutize::Absolutize;
@@ -23,12 +23,14 @@ fn absolute_path<P: AsRef<Path>>(path: P) -> PathBuf {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum TreeType {
     Standard,
+    Blob,
 }
 
 impl From<TreeType> for u8 {
     fn from(val: TreeType) -> Self {
         match val {
             TreeType::Standard => 0,
+            TreeType::Blob => 1,
         }
     }
 }
@@ -39,6 +41,7 @@ impl TryFrom<u8> for TreeType {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Standard),
+            1 => Ok(Self::Blob),
             _ => Err(()),
         }
     }
@@ -249,6 +252,16 @@ impl Config {
     /// Will return `Err` if an IO error occurs.
     pub fn open(self) -> crate::Result<Tree> {
         Tree::open(self)
+    }
+
+    /// Opens a blob tree using the config.
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if an IO error occurs.
+    pub fn open_as_blob_tree(mut self) -> crate::Result<BlobTree> {
+        self.inner.r#type = TreeType::Blob;
+        BlobTree::open(self)
     }
 }
 
